@@ -1,4 +1,7 @@
-#!/usr/bin/env python
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
 import logging
 import os
@@ -213,7 +216,7 @@ def main():
     model = get_model(training_args, config, tokenizer)
     model.to(training_args.device)
 
-    tokenized_datasets = load_from_disk(Path(dataset_args.dataset_path))
+    tokenized_datasets = load_from_disk(dataset_args.dataset_path)
     # This data collator will take care of randomly masking the tokens.
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer)
 
