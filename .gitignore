@@ -90,3 +90,7 @@ examples/albert/wandb/*
 examples/albert/data/*
 examples/albert/outputs/*
 examples/albert/wandb/*
+
+examples/gpt2/runs/*
+
+.vscode/*
