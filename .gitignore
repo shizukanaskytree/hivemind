@@ -81,3 +81,12 @@ hivemind/proto/*_pb2*
 
 # libp2p-daemon binary
 hivemind/hivemind_cli/p2pd
+
+.eggs/*
+examples/albert/data/*
+examples/albert/outputs/*
+examples/albert/wandb/*
+
+examples/albert/data/*
+examples/albert/outputs/*
+examples/albert/wandb/*
