@@ -128,7 +128,7 @@ class CheckpointHandler:
         self.previous_step = -1
 
         config = GPT2Config.from_json_file(
-            "./gpt2/config/model_config_dialogue_small.json"
+            "./config/model_config_dialogue_small.json"
         )
         self.model = GPT2LMHeadModel(config=config)
 
