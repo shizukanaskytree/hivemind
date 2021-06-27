@@ -1,7 +1,7 @@
-# import debugpy
-# debugpy.listen(5678)
-# debugpy.wait_for_client()
-# debugpy.breakpoint()
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
 import argparse
 import json
@@ -369,94 +369,94 @@ class dialogpt:
                 # Hivemind collaborative
                 self.collaborative_call.on_step_end(loss.item())
 
-            # calculate validate loss
-            with torch.no_grad():
-                self.model.eval()
-                valid_loss = []
-                for batch in tqdm(valid_dataloader):
-                    batch = batch.cuda(non_blocking=True)
-                    output = self.model(batch)
-                    logits = output[0]
-                    shift_logits = logits[..., :-1, :].contiguous()
-                    shift_labels = batch[..., 1:].contiguous().cuda()
-                    loss = loss_fct(
-                        shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-                    valid_loss.append(loss.item())
-                    # free might_accumulatd tensors for OOM
-                    del batch, output, logits
+            # # calculate validate loss
+            # with torch.no_grad():
+            #     self.model.eval()
+            #     valid_loss = []
+            #     for batch in tqdm(valid_dataloader):
+            #         batch = batch.cuda(non_blocking=True)
+            #         output = self.model(batch)
+            #         logits = output[0]
+            #         shift_logits = logits[..., :-1, :].contiguous()
+            #         shift_labels = batch[..., 1:].contiguous().cuda()
+            #         loss = loss_fct(
+            #             shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            #         valid_loss.append(loss.item())
+            #         # free might_accumulatd tensors for OOM
+            #         del batch, output, logits
 
-            # calculate validate BLEU value
-            with torch.no_grad():
-                self.model.eval()
-                candidate_corpus = []
-                for sen in self.valid_question:
-                    encoded_token = [self.tokenizer.encode(sen)]
-                    encoded_token = torch.tensor(encoded_token).long()
-                    encoded_token = encoded_token.cuda()
-                    predict_sen = []
-                    for i in range(self.args.max_len):
-                        # print(encoded_token.size())
-                        outputs = self.model(input_ids=encoded_token)
-                        # print(outputs[0].shape)
-                        next_token_logits = outputs[0][0, -1, :]
-                        next_token_logits[self.tokenizer.convert_tokens_to_ids(
-                            '[UNK]')] = -float('Inf')
-                        # new decoding fixing method due to unclear training data
-                        next_token = torch.argmax(next_token_logits).view(1)
-                        # tokenizer.sep_token_id 显示还没有被设定？？？
-                        if next_token == self.tokenizer.sep_token_id or i >= 20:
-                            break
-                        predict_sen.append(next_token.item())
-                        encoded_token = torch.cat(
-                            (encoded_token.view([-1]), next_token), dim=0).view([1, -1])
+            # # calculate validate BLEU value
+            # with torch.no_grad():
+            #     self.model.eval()
+            #     candidate_corpus = []
+            #     for sen in self.valid_question:
+            #         encoded_token = [self.tokenizer.encode(sen)]
+            #         encoded_token = torch.tensor(encoded_token).long()
+            #         encoded_token = encoded_token.cuda()
+            #         predict_sen = []
+            #         for i in range(self.args.max_len):
+            #             # print(encoded_token.size())
+            #             outputs = self.model(input_ids=encoded_token)
+            #             # print(outputs[0].shape)
+            #             next_token_logits = outputs[0][0, -1, :]
+            #             next_token_logits[self.tokenizer.convert_tokens_to_ids(
+            #                 '[UNK]')] = -float('Inf')
+            #             # new decoding fixing method due to unclear training data
+            #             next_token = torch.argmax(next_token_logits).view(1)
+            #             # tokenizer.sep_token_id 显示还没有被设定？？？
+            #             if next_token == self.tokenizer.sep_token_id or i >= 20:
+            #                 break
+            #             predict_sen.append(next_token.item())
+            #             encoded_token = torch.cat(
+            #                 (encoded_token.view([-1]), next_token), dim=0).view([1, -1])
 
-                    text = self.tokenizer.convert_ids_to_tokens(predict_sen)
-                    result = ''
-                    for i in text:
-                        result += i
-                    result = jieba.cut(result, cut_all=False)
-                    result = [t for t in result]
-                    candidate_corpus.append(result)
-                # now the score
-                BLEUscore = bleu_score(
-                    candidate_corpus, self.valid_response, max_n=3, weights=[0.33, 0.33, 0.33])
+            #         text = self.tokenizer.convert_ids_to_tokens(predict_sen)
+            #         result = ''
+            #         for i in text:
+            #             result += i
+            #         result = jieba.cut(result, cut_all=False)
+            #         result = [t for t in result]
+            #         candidate_corpus.append(result)
+            #     # now the score
+            #     BLEUscore = bleu_score(
+            #         candidate_corpus, self.valid_response, max_n=3, weights=[0.33, 0.33, 0.33])
 
-            # tensorboard record loss for each epoch
-            if self.tb_writer:
-                self.tb_writer.add_scalar('Loss/train', np.mean(_loss), epoch)
-                self.tb_writer.add_scalar(
-                    'Loss/validate', np.mean(valid_loss), epoch)
-                self.tb_writer.add_scalar('BLEU/validate', BLEUscore, epoch)
-                #self.tb_writer.add_scalar('Loss/train', sum(_loss)/len(dataloader), epoch)
-                #self.tb_writer.add_scalar('Loss/validate', sum(valid_loss)/len(valid_dataloader), epoch)
+            # # tensorboard record loss for each epoch
+            # if self.tb_writer:
+            #     self.tb_writer.add_scalar('Loss/train', np.mean(_loss), epoch)
+            #     self.tb_writer.add_scalar(
+            #         'Loss/validate', np.mean(valid_loss), epoch)
+            #     self.tb_writer.add_scalar('BLEU/validate', BLEUscore, epoch)
+            #     #self.tb_writer.add_scalar('Loss/train', sum(_loss)/len(dataloader), epoch)
+            #     #self.tb_writer.add_scalar('Loss/validate', sum(valid_loss)/len(valid_dataloader), epoch)
 
-            # plot_record
-            # train_plot_record.append(np.mean(_loss)/len(dataloader))
-            # valid_plot_record.append(np.mean(valid_loss)/len(valid_dataloader))
-            train_plot_record.append(sum(_loss)/len(dataloader))
-            valid_plot_record.append(sum(valid_loss)/len(valid_dataloader))
+            # # plot_record
+            # # train_plot_record.append(np.mean(_loss)/len(dataloader))
+            # # valid_plot_record.append(np.mean(valid_loss)/len(valid_dataloader))
+            # train_plot_record.append(sum(_loss)/len(dataloader))
+            # valid_plot_record.append(sum(valid_loss)/len(valid_dataloader))
 
-            if epoch % self.args.save_epoch == 0 and epoch > 0:
-                model_save_path = './{}/model_epoch_{}'.format(
-                    parent_dir, str(epoch+1))
-                if not os.path.exists(model_save_path):
-                    os.mkdir(model_save_path)
-                model_to_save = self.model.module if hasattr(
-                    self.model, 'module') else self.model
-                model_to_save.save_pretrained(model_save_path)
+            # if epoch % self.args.save_epoch == 0 and epoch > 0:
+            #     model_save_path = './{}/model_epoch_{}'.format(
+            #         parent_dir, str(epoch+1))
+            #     if not os.path.exists(model_save_path):
+            #         os.mkdir(model_save_path)
+            #     model_to_save = self.model.module if hasattr(
+            #         self.model, 'module') else self.model
+            #     model_to_save.save_pretrained(model_save_path)
 
-                # plot loss
-                _y = train_plot_record
-                _x = [i+1 for i in range(len(_y))]
-                valid_y = valid_plot_record
-                valid_x = [i+1 for i in range(len(valid_y))]
-                plt.plot(_x, _y, label='train')
-                plt.plot(valid_x, valid_y, label='valid')
-                plt.xlabel('epoch')
-                plt.ylabel('loss')
-                plt.legend()
-                plt.savefig(
-                    './{}/loss_epoch_{}'.format(parent_dir, str(epoch+1)))
+            #     # plot loss
+            #     _y = train_plot_record
+            #     _x = [i+1 for i in range(len(_y))]
+            #     valid_y = valid_plot_record
+            #     valid_x = [i+1 for i in range(len(valid_y))]
+            #     plt.plot(_x, _y, label='train')
+            #     plt.plot(valid_x, valid_y, label='valid')
+            #     plt.xlabel('epoch')
+            #     plt.ylabel('loss')
+            #     plt.legend()
+            #     plt.savefig(
+            #         './{}/loss_epoch_{}'.format(parent_dir, str(epoch+1)))
 
 
 def setup_logging(training_args):

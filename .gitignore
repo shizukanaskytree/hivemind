@@ -86,11 +86,9 @@ hivemind/hivemind_cli/p2pd
 examples/albert/data/*
 examples/albert/outputs/*
 examples/albert/wandb/*
-
-examples/albert/data/*
-examples/albert/outputs/*
-examples/albert/wandb/*
+examples/albert/logs/*
 
 examples/gpt2/runs/*
 
 .vscode/*
+

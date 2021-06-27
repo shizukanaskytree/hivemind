@@ -35,13 +35,15 @@ class PublicKey(ABC):
         ...
 
 
-_RSA_PADDING = padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH)
+_RSA_PADDING = padding.PSS(mgf=padding.MGF1(
+    hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH)
 _RSA_HASH_ALGORITHM = hashes.SHA256()
 
 
 class RSAPrivateKey(PrivateKey):
     def __init__(self):
-        self._private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self._private_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048)
 
     _process_wide_key = None
     _process_wide_key_lock = threading.RLock()
@@ -55,7 +57,8 @@ class RSAPrivateKey(PrivateKey):
         return cls._process_wide_key
 
     def sign(self, data: bytes) -> bytes:
-        signature = self._private_key.sign(data, _RSA_PADDING, _RSA_HASH_ALGORITHM)
+        signature = self._private_key.sign(
+            data, _RSA_PADDING, _RSA_HASH_ALGORITHM)
         return base64.b64encode(signature)
 
     def get_public_key(self) -> RSAPublicKey:
@@ -72,7 +75,8 @@ class RSAPrivateKey(PrivateKey):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self._private_key = serialization.load_ssh_private_key(self._private_key, password=None)
+        self._private_key = serialization.load_ssh_private_key(
+            self._private_key, password=None)
 
 
 class RSAPublicKey(PublicKey):
@@ -84,7 +88,8 @@ class RSAPublicKey(PublicKey):
             signature = base64.b64decode(signature)
 
             # Returns None if the signature is correct, raises an exception otherwise
-            self._public_key.verify(signature, data, _RSA_PADDING, _RSA_HASH_ALGORITHM)
+            self._public_key.verify(
+                signature, data, _RSA_PADDING, _RSA_HASH_ALGORITHM)
 
             return True
         except (ValueError, exceptions.InvalidSignature):

@@ -1,25 +1,27 @@
-#!/usr/bin/env python
-
-import logging
-import os
-from dataclasses import asdict
-from pathlib import Path
-from typing import Dict, Any
-
-import torch
-import transformers
-from datasets import load_from_disk
-from torch.utils.data import DataLoader
+import metrics_utils
+from arguments import CollaborationArguments, DatasetArguments, AlbertTrainingArguments
+import hivemind
+from torch_optimizer import Lamb
+from transformers.trainer import Trainer
+from transformers.trainer_utils import is_main_process
+from transformers.optimization import get_linear_schedule_with_warmup
 from transformers import (set_seed, HfArgumentParser, TrainingArguments,
                           DataCollatorForLanguageModeling, AlbertTokenizerFast, AlbertConfig, AlbertForPreTraining)
-from transformers.optimization import get_linear_schedule_with_warmup
-from transformers.trainer_utils import is_main_process
-from transformers.trainer import Trainer
-from torch_optimizer import Lamb
+from torch.utils.data import DataLoader
+from datasets import load_from_disk
+import transformers
+import torch
+from typing import Dict, Any
+from pathlib import Path
+from dataclasses import asdict
+import os
+import logging
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
-import hivemind
-from arguments import CollaborationArguments, DatasetArguments, AlbertTrainingArguments
-import metrics_utils
+#!/usr/bin/env python
 
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,8 @@ def setup_logging(training_args):
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO if is_main_process(training_args.local_rank) else logging.WARN,
+        level=logging.INFO if is_main_process(
+            training_args.local_rank) else logging.WARN,
     )
 
     # Log on each process the small summary:
@@ -49,8 +52,10 @@ def setup_logging(training_args):
 def get_model(training_args, config, tokenizer):
     # Find latest checkpoint in output_dir
     output_dir = Path(training_args.output_dir)
-    logger.info(f'Checkpoint dir {output_dir}, contents {list(output_dir.glob("checkpoint*"))}')
-    latest_checkpoint_dir = max(output_dir.glob('checkpoint*'), default=None, key=os.path.getctime)
+    logger.info(
+        f'Checkpoint dir {output_dir}, contents {list(output_dir.glob("checkpoint*"))}')
+    latest_checkpoint_dir = max(output_dir.glob(
+        'checkpoint*'), default=None, key=os.path.getctime)
 
     if latest_checkpoint_dir is not None:
         logger.info(f'Loading model from {latest_checkpoint_dir}')
@@ -137,7 +142,8 @@ class CollaborativeCallback(transformers.TrainerCallback):
                     loss=self.loss,
                     mini_steps=self.steps)
                 logger.info(f"Step {self.collaborative_optimizer.local_step}")
-                logger.info(f"Your current contribution: {self.total_samples_processed} samples")
+                logger.info(
+                    f"Your current contribution: {self.total_samples_processed} samples")
                 if self.steps:
                     logger.info(f"Local loss: {self.loss / self.steps}")
 
@@ -195,12 +201,15 @@ class NoOpScheduler(LRSchedulerBase):
 
 
 def main():
-    parser = HfArgumentParser((AlbertTrainingArguments, DatasetArguments, CollaborationArguments))
+    parser = HfArgumentParser(
+        (AlbertTrainingArguments, DatasetArguments, CollaborationArguments))
     training_args, dataset_args, collaboration_args = parser.parse_args_into_dataclasses()
 
-    logger.info(f"Found {len(collaboration_args.initial_peers)} initial peers: {collaboration_args.initial_peers}")
+    logger.info(
+        f"Found {len(collaboration_args.initial_peers)} initial peers: {collaboration_args.initial_peers}")
     if len(collaboration_args.initial_peers) == 0:
-        raise ValueError("Please specify at least one network endpoint in initial peers.")
+        raise ValueError(
+            "Please specify at least one network endpoint in initial peers.")
 
     collaboration_args_dict = asdict(collaboration_args)
     setup_logging(training_args)
@@ -208,12 +217,14 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    config = AlbertConfig.from_pretrained(dataset_args.config_path, cache_dir=dataset_args.cache_dir)
-    tokenizer = AlbertTokenizerFast.from_pretrained(dataset_args.tokenizer_path, cache_dir=dataset_args.cache_dir)
+    config = AlbertConfig.from_pretrained(
+        dataset_args.config_path, cache_dir=dataset_args.cache_dir)
+    tokenizer = AlbertTokenizerFast.from_pretrained(
+        dataset_args.tokenizer_path, cache_dir=dataset_args.cache_dir)
     model = get_model(training_args, config, tokenizer)
     model.to(training_args.device)
 
-    tokenized_datasets = load_from_disk(Path(dataset_args.dataset_path))
+    tokenized_datasets = load_from_disk(dataset_args.dataset_path)
     # This data collator will take care of randomly masking the tokens.
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer)
 
@@ -227,16 +238,22 @@ def main():
         listen_on=collaboration_args_dict.pop('dht_listen_on'),
         endpoint=collaboration_args_dict.pop('endpoint'), record_validators=validators)
 
-    total_batch_size_per_step = training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
-    statistics_expiration = collaboration_args_dict.pop('statistics_expiration')
+    total_batch_size_per_step = training_args.per_device_train_batch_size * \
+        training_args.gradient_accumulation_steps
+    statistics_expiration = collaboration_args_dict.pop(
+        'statistics_expiration')
     adjusted_target_batch_size = collaboration_args_dict.pop('target_batch_size') \
-                                 - collaboration_args_dict.pop('batch_size_lead')
+        - collaboration_args_dict.pop('batch_size_lead')
 
     collaborative_optimizer = hivemind.CollaborativeOptimizer(
-        opt=opt, dht=dht, scheduler=scheduler, prefix=collaboration_args_dict.pop('experiment_prefix'),
-        compression_type=hivemind.utils.CompressionType.Value(collaboration_args_dict.pop('compression')),
-        batch_size_per_step=total_batch_size_per_step, throughput=collaboration_args_dict.pop('bandwidth'),
-        target_batch_size=adjusted_target_batch_size, client_mode=collaboration_args_dict.pop('client_mode'),
+        opt=opt, dht=dht, scheduler=scheduler, prefix=collaboration_args_dict.pop(
+            'experiment_prefix'),
+        compression_type=hivemind.utils.CompressionType.Value(
+            collaboration_args_dict.pop('compression')),
+        batch_size_per_step=total_batch_size_per_step, throughput=collaboration_args_dict.pop(
+            'bandwidth'),
+        target_batch_size=adjusted_target_batch_size, client_mode=collaboration_args_dict.pop(
+            'client_mode'),
         verbose=True, start=True, **collaboration_args_dict
     )
 
@@ -250,7 +267,8 @@ def main():
         model=model, args=training_args, tokenizer=tokenizer, data_collator=data_collator,
         train_dataset=tokenized_datasets["train"] if training_args.do_train else None,
         eval_dataset=tokenized_datasets["validation"] if training_args.do_eval else None,
-        optimizers=(collaborative_optimizer, NoOpScheduler(collaborative_optimizer)),
+        optimizers=(collaborative_optimizer,
+                    NoOpScheduler(collaborative_optimizer)),
         callbacks=[CollaborativeCallback(
             dht, collaborative_optimizer, model, local_public_key, statistics_expiration)]
     )

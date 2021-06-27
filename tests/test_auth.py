@@ -1,13 +1,15 @@
-from datetime import datetime, timedelta
-from typing import Optional, Tuple
-
-import pytest
-
-from hivemind.proto import dht_pb2
-from hivemind.proto.auth_pb2 import AccessToken
-from hivemind.utils.auth import AuthRPCWrapper, AuthRole, TokenAuthorizerBase
-from hivemind.utils.crypto import RSAPrivateKey, RSAPublicKey
 from hivemind.utils.logging import get_logger
+from hivemind.utils.crypto import RSAPrivateKey, RSAPublicKey
+from hivemind.utils.auth import AuthRPCWrapper, AuthRole, TokenAuthorizerBase
+from hivemind.proto.auth_pb2 import AccessToken
+from hivemind.proto import dht_pb2
+import pytest
+from typing import Optional, Tuple
+from datetime import datetime, timedelta
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+# debugpy.breakpoint()
 
 
 logger = get_logger(__name__)
@@ -17,7 +19,7 @@ class MockAuthorizer(TokenAuthorizerBase):
     _authority_private_key = None
     _authority_public_key = None
 
-    def __init__(self, local_private_key: Optional[RSAPrivateKey], username: str='mock'):
+    def __init__(self, local_private_key: Optional[RSAPrivateKey], username: str = 'mock'):
         super().__init__(local_private_key)
 
         self._username = username
@@ -32,7 +34,8 @@ class MockAuthorizer(TokenAuthorizerBase):
         token = AccessToken(username=self._username,
                             public_key=self.local_public_key.to_bytes(),
                             expiration_time=str(datetime.utcnow() + timedelta(minutes=1)))
-        token.signature = MockAuthorizer._authority_private_key.sign(self._token_to_bytes(token))
+        token.signature = MockAuthorizer._authority_private_key.sign(
+            self._token_to_bytes(token))
         return token
 
     def is_token_valid(self, access_token: AccessToken) -> bool:
@@ -42,13 +45,15 @@ class MockAuthorizer(TokenAuthorizerBase):
             return False
 
         try:
-            expiration_time = datetime.fromisoformat(access_token.expiration_time)
+            expiration_time = datetime.fromisoformat(
+                access_token.expiration_time)
         except ValueError:
             logger.exception(
                 f'datetime.fromisoformat() failed to parse expiration time: {access_token.expiration_time}')
             return False
         if expiration_time.tzinfo is not None:
-            logger.exception(f'Expected to have no timezone for expiration time: {access_token.expiration_time}')
+            logger.exception(
+                f'Expected to have no timezone for expiration time: {access_token.expiration_time}')
             return False
         if expiration_time < datetime.utcnow():
             logger.exception('Access token has expired')
@@ -149,8 +154,10 @@ async def test_auth_rpc_wrapper():
         async def rpc_increment(self, request: dht_pb2.PingRequest) -> dht_pb2.PingResponse:
             return await self._servicer.rpc_increment(request)
 
-    servicer = AuthRPCWrapper(Servicer(), AuthRole.SERVICER, MockAuthorizer(RSAPrivateKey(), 'bob'))
-    client = AuthRPCWrapper(Client(servicer), AuthRole.CLIENT, MockAuthorizer(RSAPrivateKey(), 'alice'))
+    servicer = AuthRPCWrapper(
+        Servicer(), AuthRole.SERVICER, MockAuthorizer(RSAPrivateKey(), 'bob'))
+    client = AuthRPCWrapper(Client(servicer), AuthRole.CLIENT,
+                            MockAuthorizer(RSAPrivateKey(), 'alice'))
 
     request = dht_pb2.PingRequest()
     request.peer.endpoint = '127.0.0.1:1111'

@@ -10,6 +10,10 @@ from hivemind.dht.crypto import RSASignatureValidator
 from hivemind.dht.node import LOCALHOST
 from hivemind.dht.validation import DHTRecord
 from hivemind.utils.crypto import RSAPrivateKey
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
 
 def test_rsa_signature_validator():
@@ -68,7 +72,8 @@ def test_validator_instance_is_picklable():
 
     record = DHTRecord(key=b'key', subkey=b'subkey' + original_validator.local_public_key,
                        value=b'value', expiration_time=get_dht_time() + 10)
-    signed_record = dataclasses.replace(record, value=unpickled_validator.sign_value(record))
+    signed_record = dataclasses.replace(
+        record, value=unpickled_validator.sign_value(record))
 
     assert b'[signature:' in signed_record.value
     assert original_validator.validate(signed_record)
