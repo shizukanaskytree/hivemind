@@ -36,15 +36,18 @@ class TrainingAverager(DecentralizedAverager):
                  average_opt_statistics: Sequence[str] = (), extra_tensors: Sequence[torch.Tensor] = (),
                  initialize_optimizer: bool = True, **kwargs):
 
-        self.opt, self.extra_tensors, self.local_step = opt, tuple(extra_tensors), 0
+        self.opt, self.extra_tensors, self.local_step = opt, tuple(
+            extra_tensors), 0
         self.opt_statistics = tuple(average_opt_statistics)
         self.average_parameters, self.average_gradients = average_parameters, average_gradients
         self.lock_averager_step = Lock()
         if initialize_optimizer:
-            initialize_optimizer_state(opt)  # note: this will run one optimizer step!
+            # note: this will run one optimizer step!
+            initialize_optimizer_state(opt)
 
         with torch.no_grad():
-            averaged_tensors = [tensor.detach().cpu().float().clone() for tensor in self.local_tensors()]
+            averaged_tensors = [tensor.detach().cpu().float().clone()
+                                for tensor in self.local_tensors()]
         super().__init__(averaged_tensors=averaged_tensors, **kwargs)
 
     @torch.no_grad()
@@ -67,7 +70,8 @@ class TrainingAverager(DecentralizedAverager):
             # fill averager's tensors with current local tensors
             with data_lock, self.get_tensors() as averaged_tensors:
                 if use_old_local_tensors:
-                    old_local_tensors = tuple(x.cpu().float().clone() for x in local_tensors)
+                    old_local_tensors = tuple(
+                        x.cpu().float().clone() for x in local_tensors)
                 assert len(local_tensors) == len(
                     averaged_tensors), "The number of optimized parameters should not change."
                 for averaged_tensor, local_tensor in zip(averaged_tensors, local_tensors):
@@ -79,7 +83,8 @@ class TrainingAverager(DecentralizedAverager):
                 # load averaged tensors back into model
                 with data_lock, self.get_tensors() as averaged_tensors:
                     if len(averaged_tensors) != len(local_tensors):
-                        raise RuntimeError("The number of optimized parameters should not change.")
+                        raise RuntimeError(
+                            "The number of optimized parameters should not change.")
 
                     if use_old_local_tensors:
                         # since tensors might have changed, we subtract old_local_tensor and add averaged. This prevents
@@ -88,11 +93,12 @@ class TrainingAverager(DecentralizedAverager):
                                                                                    old_local_tensors):
                             local_tensor[...] += averaged_tensor.to(dtype=local_tensor.dtype,
                                                                     device=local_tensor.device) - \
-                                                 old_local_tensor.to(dtype=local_tensor.dtype,
-                                                                     device=local_tensor.device)
+                                old_local_tensor.to(dtype=local_tensor.dtype,
+                                                    device=local_tensor.device)
                     else:
                         for averaged_tensor, local_tensor in zip(averaged_tensors, local_tensors):
-                            local_tensor[...] = averaged_tensor.to(dtype=local_tensor.dtype, device=local_tensor.device)
+                            local_tensor[...] = averaged_tensor.to(
+                                dtype=local_tensor.dtype, device=local_tensor.device)
 
             self.local_step += 1
             return gathered
@@ -128,10 +134,13 @@ class TrainingAverager(DecentralizedAverager):
         with torch.no_grad():
             optimized_parameters = tuple(param.detach().cpu() for param_group in self.opt.param_groups
                                          for param in param_group['params'])
-            extra_tensors = tuple(tensor.detach().cpu() for tensor in self.extra_tensors)
-            optimizer_metadata, optimizer_tensors = dump_optimizer_state(self.opt)
+            extra_tensors = tuple(tensor.detach().cpu()
+                                  for tensor in self.extra_tensors)
+            optimizer_metadata, optimizer_tensors = dump_optimizer_state(
+                self.opt)
 
-        metadata = dict(step=self.local_step, group_bits=self.get_group_bits(), optimizer_metadata=optimizer_metadata)
+        metadata = dict(step=self.local_step, group_bits=self.get_group_bits(
+        ), optimizer_metadata=optimizer_metadata)
         return metadata, list(chain(optimized_parameters, extra_tensors, optimizer_tensors))
 
     def load_state_from_peers(self, **kwargs):
@@ -139,7 +148,8 @@ class TrainingAverager(DecentralizedAverager):
         Attempt to download the latest optimizer state from peers and update trainer parameters/statistics.
         :returns: whether or the averager succeeded in loading parameters
         """
-        parameters_and_extras = [param for param_group in self.opt.param_groups for param in param_group['params']]
+        parameters_and_extras = [
+            param for param_group in self.opt.param_groups for param in param_group['params']]
         parameters_and_extras.extend(self.extra_tensors)
         num_local_tensors = len(parameters_and_extras)
 
@@ -153,7 +163,8 @@ class TrainingAverager(DecentralizedAverager):
         with torch.no_grad():
             for local_param, loaded_param in zip(parameters_and_extras, loaded_parameters_and_extras):
                 local_param[...] = loaded_param
-            load_optimizer_state(self.opt, metadata['optimizer_metadata'], loaded_opt_tensors)
+            load_optimizer_state(
+                self.opt, metadata['optimizer_metadata'], loaded_opt_tensors)
 
         self.local_step = max(self.local_step, metadata['step'])
 
@@ -172,7 +183,8 @@ def dump_optimizer_state(opt: torch.optim.Optimizer):
         flat_metadata, flat_tensors = [], []
         for elem in nested_flatten(opt.state_dict()):
             if isinstance(elem, torch.Tensor):
-                flat_metadata.append(dict(type='tensor', index=len(flat_tensors)))
+                flat_metadata.append(
+                    dict(type='tensor', index=len(flat_tensors)))
                 flat_tensors.append(elem.cpu())
             else:
                 flat_metadata.append(dict(type='value', value=elem))

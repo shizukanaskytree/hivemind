@@ -1,21 +1,21 @@
-#!/usr/bin/env python
-
-from dataclasses import dataclass, field, asdict
-import subprocess
-import time
-from typing import Optional
-
-import torch
-from torch_optimizer import Lamb
-from transformers import AlbertForPreTraining, AlbertConfig, HfArgumentParser
-import wandb
-from whatsmyip.providers import GoogleDnsProvider
-from whatsmyip.ip import get_ip
-
-from arguments import BaseTrainingArguments, CollaborativeOptimizerArguments, AveragerArguments
-import hivemind
-from hivemind.utils.logging import get_logger
 import metrics_utils
+from hivemind.utils.logging import get_logger
+import hivemind
+from arguments import BaseTrainingArguments, CollaborativeOptimizerArguments, AveragerArguments
+from whatsmyip.ip import get_ip
+from whatsmyip.providers import GoogleDnsProvider
+import wandb
+from transformers import AlbertForPreTraining, AlbertConfig, HfArgumentParser
+from torch_optimizer import Lamb
+import torch
+from typing import Optional
+import time
+import subprocess
+from dataclasses import dataclass, field, asdict
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+# debugpy.breakpoint()
 
 
 logger = get_logger(__name__)
@@ -35,7 +35,8 @@ class CoordinatorArguments(BaseTrainingArguments):
     )
     refresh_period: float = field(
         default=30,
-        metadata={"help": "Coordinator will fetch keys from DHT once in this many seconds"}
+        metadata={
+            "help": "Coordinator will fetch keys from DHT once in this many seconds"}
     )
     wandb_project: Optional[str] = field(
         default=None,
@@ -43,7 +44,8 @@ class CoordinatorArguments(BaseTrainingArguments):
     )
     save_checkpoint_step_interval: int = field(
         default=5,
-        metadata={"help": "Coordinator will load and save state from peers once every that many steps"}
+        metadata={
+            "help": "Coordinator will load and save state from peers once every that many steps"}
     )
     model_config_path: str = field(
         default='https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v2-config.json',
@@ -51,7 +53,8 @@ class CoordinatorArguments(BaseTrainingArguments):
     )
     repo_path: Optional[str] = field(
         default=None,
-        metadata={"help": "Path to HuggingFace repo in which coordinator will upload the model and optimizer states"}
+        metadata={
+            "help": "Path to HuggingFace repo in which coordinator will upload the model and optimizer states"}
     )
     upload_interval: Optional[float] = field(
         default=None,
@@ -67,7 +70,8 @@ class CheckpointHandler:
         self.upload_interval = coordinator_args.upload_interval
         self.previous_step = -1
 
-        config = AlbertConfig.from_pretrained(coordinator_args.model_config_path)
+        config = AlbertConfig.from_pretrained(
+            coordinator_args.model_config_path)
         self.model = AlbertForPreTraining(config)
 
         no_decay = ["bias", "LayerNorm.weight"]
@@ -87,11 +91,13 @@ class CheckpointHandler:
             lr=0.00176, weight_decay=0.01, clamp_value=10000.0, debias=True,
         )
 
-        adjusted_target_batch_size = collab_optimizer_args.target_batch_size - collab_optimizer_args.batch_size_lead
+        adjusted_target_batch_size = collab_optimizer_args.target_batch_size - \
+            collab_optimizer_args.batch_size_lead
 
         self.collaborative_optimizer = hivemind.CollaborativeOptimizer(
             opt=opt, dht=dht, prefix=experiment_prefix,
-            compression_type=hivemind.utils.CompressionType.Value(collab_optimizer_args.compression),
+            compression_type=hivemind.utils.CompressionType.Value(
+                collab_optimizer_args.compression),
             throughput=collab_optimizer_args.bandwidth,
             target_batch_size=adjusted_target_batch_size, client_mode=collab_optimizer_args.client_mode,
             verbose=True, start=True, **asdict(averager_args)
@@ -120,28 +126,34 @@ class CheckpointHandler:
 
     def upload_checkpoint(self, current_loss):
         self.model.save_pretrained(self.repo_path)
-        torch.save(self.collaborative_optimizer.opt.state_dict(), f"{self.repo_path}/optimizer_state.pt")
+        torch.save(self.collaborative_optimizer.opt.state_dict(),
+                   f"{self.repo_path}/optimizer_state.pt")
         self.previous_timestamp = time.time()
         try:
-            subprocess.run("git add --all", shell=True, check=True, cwd=self.repo_path)
+            subprocess.run("git add --all", shell=True,
+                           check=True, cwd=self.repo_path)
             current_step = self.collaborative_optimizer.collaboration_state.optimizer_step
             subprocess.run(f"git commit -m 'Step {current_step}, loss {current_loss:.3f}'",
                            shell=True, check=True, cwd=self.repo_path)
-            subprocess.run("git push", shell=True, check=True, cwd=self.repo_path)
+            subprocess.run("git push", shell=True,
+                           check=True, cwd=self.repo_path)
         except subprocess.CalledProcessError as e:
             logger.warning("Error while uploading model:", e.output)
 
 
 if __name__ == '__main__':
-    parser = HfArgumentParser((CoordinatorArguments, CollaborativeOptimizerArguments, AveragerArguments))
+    parser = HfArgumentParser(
+        (CoordinatorArguments, CollaborativeOptimizerArguments, AveragerArguments))
     coordinator_args, collab_optimizer_args, averager_args = parser.parse_args_into_dataclasses()
 
     if coordinator_args.address is None:
-        logger.warning("No address specified. Attempting to infer address from DNS.")
+        logger.warning(
+            "No address specified. Attempting to infer address from DNS.")
         coordinator_args.address = get_ip(GoogleDnsProvider)
 
     experiment_prefix = coordinator_args.experiment_prefix
-    validators, local_public_key = metrics_utils.make_validators(experiment_prefix)
+    validators, local_public_key = metrics_utils.make_validators(
+        experiment_prefix)
     dht = hivemind.DHT(start=True, listen_on=coordinator_args.dht_listen_on,
                        endpoint=f"{coordinator_args.address}:*", initial_peers=coordinator_args.initial_peers,
                        record_validators=validators)
@@ -153,7 +165,8 @@ if __name__ == '__main__':
 
     current_step = 0
 
-    checkpoint_handler = CheckpointHandler(coordinator_args, collab_optimizer_args, averager_args, dht)
+    checkpoint_handler = CheckpointHandler(
+        coordinator_args, collab_optimizer_args, averager_args, dht)
 
     while True:
         metrics_dict = dht.get(experiment_prefix + '_metrics', latest=True)
