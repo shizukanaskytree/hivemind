@@ -63,7 +63,8 @@ class AveragerArguments:
     )
     expected_drift_peers: float = field(
         default=3,
-        metadata={"help": "Trainer assumes that this many new peers can join per step"},
+        metadata={
+            "help": "Trainer assumes that this many new peers can join per step"},
     )
     expected_drift_rate: float = field(
         default=0.2,
@@ -117,7 +118,8 @@ class CollaborativeOptimizerArguments:
     )
     compression: str = field(
         default="FLOAT16",
-        metadata={"help": "Use this compression when averaging parameters/gradients"},
+        metadata={
+            "help": "Use this compression when averaging parameters/gradients"},
     )
 
 
