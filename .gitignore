@@ -94,3 +94,4 @@ examples/albert/wandb/*
 examples/gpt2/runs/*
 
 .vscode/*
+examples/gpt2/wandb/*

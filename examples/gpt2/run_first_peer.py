@@ -61,7 +61,7 @@ tqdm.pandas()
 PAD = "[PAD]"
 pad_id = 0
 
-
+torch.multiprocessing.set_sharing_strategy('file_system')
 logger = get_logger(__name__)
 
 
