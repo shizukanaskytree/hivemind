@@ -17,7 +17,6 @@ debugpy.listen(5678)
 debugpy.wait_for_client()
 debugpy.breakpoint()
 
-
 logger = get_logger(__name__)
 
 
@@ -176,6 +175,10 @@ if __name__ == '__main__':
                        for peer in metrics_dict]
             latest_step = max(item.step for item in metrics)
             if latest_step != current_step:
+                logger.debug(f"Got metrics from {len(metrics)} peers")
+
+                for i, metrics_for_peer in enumerate(metrics):
+                    logger.debug(f"{i} peer {metrics_for_peer}")
                 current_step = latest_step
                 alive_peers = 0
                 num_batches = 0
