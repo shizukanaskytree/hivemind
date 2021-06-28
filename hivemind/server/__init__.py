@@ -18,11 +18,24 @@ from hivemind.server.connection_handler import ConnectionHandler
 from hivemind.server.dht_handler import DHTHandlerThread, declare_experts, get_experts
 from hivemind.server.expert_backend import ExpertBackend
 from hivemind.server.layers import name_to_block, name_to_input
-from hivemind.server.layers import add_custom_models_from_file, schedule_name_to_scheduler
+from hivemind.server.layers import (
+    add_custom_models_from_file,
+    schedule_name_to_scheduler,
+)
 from hivemind.server.runtime import Runtime
 from hivemind.server.task_pool import Task, TaskPool, TaskPoolBase
-from hivemind.utils import Endpoint, get_port, replace_port, find_open_port, get_logger, BatchTensorDescriptor
+from hivemind.utils import (
+    Endpoint,
+    get_port,
+    replace_port,
+    find_open_port,
+    get_logger,
+    BatchTensorDescriptor,
+)
 from hivemind.proto.runtime_pb2 import CompressionType
+
+# cnn model
+from hivemind.server.layers import common_cnn
 
 logger = get_logger(__name__)
 
@@ -50,35 +63,74 @@ class Server(threading.Thread):
     """
 
     def __init__(
-            self, dht: Optional[DHT], expert_backends: Dict[str, ExpertBackend], listen_on: Endpoint = "0.0.0.0:*",
-            num_connection_handlers: int = 1, update_period: int = 30, start=False, checkpoint_dir=None, **kwargs):
+        self,
+        dht: Optional[DHT],
+        expert_backends: Dict[str, ExpertBackend],
+        listen_on: Endpoint = "0.0.0.0:*",
+        num_connection_handlers: int = 1,
+        update_period: int = 30,
+        start=False,
+        checkpoint_dir=None,
+        **kwargs,
+    ):
         super().__init__()
         self.dht, self.experts, self.update_period = dht, expert_backends, update_period
         if get_port(listen_on) is None:
             listen_on = replace_port(listen_on, new_port=find_open_port())
         self.listen_on, self.port = listen_on, get_port(listen_on)
 
-        self.conn_handlers = [ConnectionHandler(listen_on, self.experts) for _ in range(num_connection_handlers)]
+        self.conn_handlers = [
+            ConnectionHandler(listen_on, self.experts)
+            for _ in range(num_connection_handlers)
+        ]
         if checkpoint_dir is not None:
-            self.checkpoint_saver = CheckpointSaver(expert_backends, checkpoint_dir, update_period)
+            self.checkpoint_saver = CheckpointSaver(
+                expert_backends, checkpoint_dir, update_period
+            )
         else:
             self.checkpoint_saver = None
         self.runtime = Runtime(self.experts, **kwargs)
 
         if self.dht and self.experts:
-            self.dht_handler_thread = DHTHandlerThread(experts=self.experts, dht=self.dht, endpoint=self.listen_on,
-                                                       update_period=self.update_period, daemon=True)
+            self.dht_handler_thread = DHTHandlerThread(
+                experts=self.experts,
+                dht=self.dht,
+                endpoint=self.listen_on,
+                update_period=self.update_period,
+                daemon=True,
+            )
 
         if start:
             self.run_in_background(await_ready=True)
 
     @classmethod
-    def create(cls, listen_on='0.0.0.0:*', num_experts: int = None, expert_uids: str = None, expert_pattern: str = None,
-               expert_cls='ffn', hidden_dim=1024, optim_cls=torch.optim.Adam, scheduler: str = 'none',
-               num_warmup_steps=None, num_total_steps=None, clip_grad_norm=None, num_handlers=None, min_batch_size=1,
-               max_batch_size=4096, device=None, no_dht=False, initial_peers=(), dht_port=None,
-               checkpoint_dir: Optional[Path] = None, compression=CompressionType.NONE,
-               stats_report_interval: Optional[int] = None, custom_module_path=None, *, start: bool) -> Server:
+    def create(
+        cls,
+        listen_on="0.0.0.0:*",
+        num_experts: int = None,
+        expert_uids: str = None,
+        expert_pattern: str = None,
+        expert_cls="ffn",
+        hidden_dim=1024,
+        optim_cls=torch.optim.Adam,
+        scheduler: str = "none",
+        num_warmup_steps=None,
+        num_total_steps=None,
+        clip_grad_norm=None,
+        num_handlers=None,
+        min_batch_size=1,
+        max_batch_size=4096,
+        device=None,
+        no_dht=False,
+        initial_peers=(),
+        dht_port=None,
+        checkpoint_dir: Optional[Path] = None,
+        compression=CompressionType.NONE,
+        stats_report_interval: Optional[int] = None,
+        custom_module_path=None,
+        *,
+        start: bool,
+    ) -> Server:
         """
         Instantiate a server with several identical experts. See argparse comments below for details
         :param listen_on: network interface with address and (optional) port, e.g. "127.0.0.1:1337" or "[::]:80"
@@ -117,71 +169,117 @@ class Server(threading.Thread):
         """
         if custom_module_path is not None:
             add_custom_models_from_file(custom_module_path)
-        assert expert_cls in name_to_block
+        # assert expert_cls in name_to_block
 
         if no_dht:
             dht = None
         else:
-            dht_endpoint = replace_port(listen_on, dht_port or hivemind.find_open_port())
-            dht = hivemind.DHT(initial_peers=initial_peers, start=True, listen_on=dht_endpoint)
-            logger.info(f"Running DHT node on port {dht.port}, initial peers = {initial_peers}")
+            dht_endpoint = replace_port(
+                listen_on, dht_port or hivemind.find_open_port()
+            )
+            dht = hivemind.DHT(
+                initial_peers=initial_peers, start=True, listen_on=dht_endpoint
+            )
+            logger.info(
+                f"Running DHT node on port {dht.port}, initial peers = {initial_peers}"
+            )
 
-        assert ((expert_pattern is None and num_experts is None and expert_uids is not None) or
-                (num_experts is not None and expert_uids is None)), \
-            "Please provide either expert_uids *or* num_experts (possibly with expert_pattern), but not both"
+        assert (
+            expert_pattern is None and num_experts is None and expert_uids is not None
+        ) or (
+            num_experts is not None and expert_uids is None
+        ), "Please provide either expert_uids *or* num_experts (possibly with expert_pattern), but not both"
 
         if expert_uids is None:
             if checkpoint_dir is not None:
                 assert is_directory(checkpoint_dir)
-                expert_uids = [child.name for child in checkpoint_dir.iterdir() if
-                               (child / 'checkpoint_last.pt').exists()]
+                expert_uids = [
+                    child.name
+                    for child in checkpoint_dir.iterdir()
+                    if (child / "checkpoint_last.pt").exists()
+                ]
                 total_experts_in_checkpoint = len(expert_uids)
-                logger.info(f"Located {total_experts_in_checkpoint} checkpoints for experts {expert_uids}")
+                logger.info(
+                    f"Located {total_experts_in_checkpoint} checkpoints for experts {expert_uids}"
+                )
 
                 if total_experts_in_checkpoint > num_experts:
                     raise ValueError(
                         f"Found {total_experts_in_checkpoint} checkpoints, but num_experts is set to {num_experts}, "
-                        f"which is smaller. Either increase num_experts or remove unneeded checkpoints.")
+                        f"which is smaller. Either increase num_experts or remove unneeded checkpoints."
+                    )
             else:
                 expert_uids = []
 
             uids_to_generate = num_experts - len(expert_uids)
             if uids_to_generate > 0:
-                logger.info(f"Generating {uids_to_generate} expert uids from pattern {expert_pattern}")
-                expert_uids.extend(generate_uids_from_pattern(uids_to_generate, expert_pattern, dht))
+                logger.info(
+                    f"Generating {uids_to_generate} expert uids from pattern {expert_pattern}"
+                )
+                expert_uids.extend(
+                    generate_uids_from_pattern(uids_to_generate, expert_pattern, dht)
+                )
 
         num_experts = len(expert_uids)
         num_handlers = num_handlers if num_handlers is not None else num_experts * 8
-        optim_cls = optim_cls if optim_cls is not None else partial(torch.optim.SGD, lr=0.0)
-        device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        optim_cls = (
+            optim_cls if optim_cls is not None else partial(torch.optim.SGD, lr=0.0)
+        )
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-        sample_input = name_to_input[expert_cls](3, hidden_dim)
+        # Is 3 this batch size?, does it matter?
+        sample_input = name_to_input[expert_cls](3)
+
         if isinstance(sample_input, tuple):
-            args_schema = tuple(BatchTensorDescriptor.from_tensor(arg, compression) for arg in sample_input)
+            args_schema = tuple(
+                BatchTensorDescriptor.from_tensor(arg, compression)
+                for arg in sample_input
+            )
         else:
-            args_schema = (BatchTensorDescriptor.from_tensor(sample_input, compression),)
+            args_schema = (
+                BatchTensorDescriptor.from_tensor(sample_input, compression),
+            )
 
         scheduler = schedule_name_to_scheduler[scheduler]
 
         # initialize experts
         experts = {}
         for expert_uid in expert_uids:
-            expert = name_to_block[expert_cls](hidden_dim)
-            experts[expert_uid] = hivemind.ExpertBackend(name=expert_uid, expert=expert,
-                                                         args_schema=args_schema,
-                                                         optimizer=optim_cls(expert.parameters()),
-                                                         scheduler=scheduler,
-                                                         num_warmup_steps=num_warmup_steps,
-                                                         num_total_steps=num_total_steps,
-                                                         clip_grad_norm=clip_grad_norm,
-                                                         min_batch_size=min_batch_size,
-                                                         max_batch_size=max_batch_size)
+
+            # expert = name_to_block[expert_cls](hidden_dim)
+            # 开关切换
+            expert = (
+                common_cnn.MobileNetV2_1
+                if expert_cls == "m1"
+                else common_cnn.MobileNetV2_2
+            )
+
+            experts[expert_uid] = hivemind.ExpertBackend(
+                name=expert_uid,
+                expert=expert,
+                args_schema=args_schema,
+                optimizer=optim_cls(expert.parameters()),
+                scheduler=scheduler,
+                num_warmup_steps=num_warmup_steps,
+                num_total_steps=num_total_steps,
+                clip_grad_norm=clip_grad_norm,
+                min_batch_size=min_batch_size,
+                max_batch_size=max_batch_size,
+            )
 
         if checkpoint_dir is not None:
             load_experts(experts, checkpoint_dir)
 
-        return cls(dht, experts, listen_on=listen_on, num_connection_handlers=num_handlers, device=device,
-                   checkpoint_dir=checkpoint_dir, stats_report_interval=stats_report_interval, start=start)
+        return cls(
+            dht,
+            experts,
+            listen_on=listen_on,
+            num_connection_handlers=num_handlers,
+            device=device,
+            checkpoint_dir=checkpoint_dir,
+            stats_report_interval=stats_report_interval,
+            start=start,
+        )
 
     def run(self):
         """
@@ -191,8 +289,12 @@ class Server(threading.Thread):
         logger.info(f"Server started at {self.listen_on}")
         logger.info(f"Got {len(self.experts)} experts:")
         for expert_name, backend in self.experts.items():
-            num_parameters = sum(p.numel() for p in backend.expert.parameters() if p.requires_grad)
-            logger.info(f"{expert_name}: {backend.expert.__class__.__name__}, {num_parameters} parameters")
+            num_parameters = sum(
+                p.numel() for p in backend.expert.parameters() if p.requires_grad
+            )
+            logger.info(
+                f"{expert_name}: {backend.expert.__class__.__name__}, {num_parameters} parameters"
+            )
 
         if self.dht:
             if not self.dht.is_alive():
@@ -233,7 +335,9 @@ class Server(threading.Thread):
         >>> server.ready.wait(timeout=10)
         >>> print("Server ready" if server.ready.is_set() else "Server didn't start in 10 seconds")
         """
-        return self.runtime.ready  # mp.Event that is true if self is ready to process batches
+        return (
+            self.runtime.ready
+        )  # mp.Event that is true if self is ready to process batches
 
     def shutdown(self):
         """
@@ -267,23 +371,29 @@ class Server(threading.Thread):
 
 
 @contextmanager
-def background_server(*args, shutdown_timeout=5, **kwargs) -> Tuple[hivemind.Endpoint, hivemind.Endpoint]:
-    """ A context manager that creates server in a background thread, awaits .ready on entry and shutdowns on exit """
+def background_server(
+    *args, shutdown_timeout=5, **kwargs
+) -> Tuple[hivemind.Endpoint, hivemind.Endpoint]:
+    """A context manager that creates server in a background thread, awaits .ready on entry and shutdowns on exit"""
     pipe, runners_pipe = mp.Pipe(duplex=True)
-    runner = mp.Process(target=_server_runner, args=(runners_pipe, *args), kwargs=kwargs)
+    runner = mp.Process(
+        target=_server_runner, args=(runners_pipe, *args), kwargs=kwargs
+    )
     try:
         runner.start()
         # once the server is ready, runner will send us either (False, exception) or (True, (server_port, dht_port))
         start_ok, data = pipe.recv()
         if start_ok:
             yield data
-            pipe.send('SHUTDOWN')  # on exit from context, send shutdown signal
+            pipe.send("SHUTDOWN")  # on exit from context, send shutdown signal
         else:
             raise RuntimeError(f"Server failed to start: {data}")
     finally:
         runner.join(timeout=shutdown_timeout)
         if runner.is_alive():
-            logger.info("Server failed to shutdown gracefully, terminating it the hard way...")
+            logger.info(
+                "Server failed to shutdown gracefully, terminating it the hard way..."
+            )
             runner.kill()
             logger.info("Server terminated.")
 
@@ -293,7 +403,7 @@ def _server_runner(pipe, *args, **kwargs):
         server = Server.create(*args, start=True, **kwargs)
     except Exception as e:
         logger.exception(f"Encountered an exception when starting a server: {e}")
-        pipe.send((False, f'{type(e).__name__} {e}'))
+        pipe.send((False, f"{type(e).__name__} {e}"))
         return
 
     try:

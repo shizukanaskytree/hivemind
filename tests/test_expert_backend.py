@@ -1,13 +1,16 @@
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
-import pytest
-import torch
-from torch.nn import Linear
-
-from hivemind import BatchTensorDescriptor, ExpertBackend
-from hivemind.server.checkpoints import store_experts, load_experts
 from hivemind.server.layers.lr_schedule import get_linear_schedule_with_warmup
+from hivemind.server.checkpoints import store_experts, load_experts
+from hivemind import BatchTensorDescriptor, ExpertBackend
+from torch.nn import Linear
+import torch
+import pytest
+from tempfile import TemporaryDirectory
+from pathlib import Path
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
+
 
 EXPERT_WEIGHT_UPDATES = 3
 BACKWARD_PASSES_BEFORE_SAVE = 2
@@ -47,7 +50,8 @@ def test_save_load_checkpoints(example_experts):
 
         assert checkpoints_dir.exists()
         # include checkpoint_last.pt
-        assert len(list(checkpoints_dir.iterdir())) == EXPERT_WEIGHT_UPDATES + 1
+        assert len(list(checkpoints_dir.iterdir())
+                   ) == EXPERT_WEIGHT_UPDATES + 1
 
         expert.weight.data[0] = 0
 
@@ -91,14 +95,16 @@ def test_lr_schedule(example_experts):
         assert optimizer.param_groups[0]['lr'] == 0.0
 
         for i in range(BACKWARD_PASSES_BEFORE_SAVE):
-            assert optimizer.param_groups[0]['lr'] == PEAK_LR * i / BACKWARD_PASSES_BEFORE_SAVE
+            assert optimizer.param_groups[0]['lr'] == PEAK_LR * \
+                i / BACKWARD_PASSES_BEFORE_SAVE
             expert_backend.backward(batch, loss_grad)
 
         assert optimizer.param_groups[0]['lr'] == PEAK_LR
         store_experts(example_experts, tmp_path)
 
         for i in range(BACKWARD_PASSES_AFTER_SAVE):
-            assert optimizer.param_groups[0]['lr'] == PEAK_LR * (1 - (i / BACKWARD_PASSES_AFTER_SAVE))
+            assert optimizer.param_groups[0]['lr'] == PEAK_LR * \
+                (1 - (i / BACKWARD_PASSES_AFTER_SAVE))
             expert_backend.backward(batch, loss_grad)
 
         assert optimizer.param_groups[0]['lr'] == 0.0

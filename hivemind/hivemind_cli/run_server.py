@@ -1,3 +1,4 @@
+import debugpy
 from functools import partial
 from pathlib import Path
 
@@ -11,6 +12,10 @@ from hivemind.utils.logging import get_logger
 from hivemind.server.layers import schedule_name_to_scheduler
 
 logger = get_logger(__name__)
+
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
 
 def main():
@@ -80,7 +85,8 @@ def main():
     compression_type = args.pop("compression")
     compression = getattr(CompressionType, compression_type)
 
-    server = Server.create(**args, optim_cls=optim_cls, start=True, compression=compression)
+    server = Server.create(**args, optim_cls=optim_cls,
+                           start=True, compression=compression)
 
     try:
         server.join()
