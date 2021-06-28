@@ -12,10 +12,10 @@ from typing import Optional
 import time
 import subprocess
 from dataclasses import dataclass, field, asdict
-import debugpy
-debugpy.listen(5678)
-debugpy.wait_for_client()
-debugpy.breakpoint()
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+# debugpy.breakpoint()
 
 logger = get_logger(__name__)
 

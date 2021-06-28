@@ -91,4 +91,4 @@ examples/albert/logs/*
 examples/gpt2/runs/*
 
 .vscode/*
-
+examples/gpt2/wandb/*
