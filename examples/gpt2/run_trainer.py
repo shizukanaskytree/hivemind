@@ -1,20 +1,29 @@
-from utils import Adam_GC
-from arguments import (
-    AlbertTrainingArguments,
-    CollaborationArguments,
-    DatasetArguments,
-    GPT2TrainingArguments,
-)
-import metrics_utils
-from transformers.trainer_utils import is_main_process
-from transformers.trainer import Trainer
-from transformers.optimization import get_linear_schedule_with_warmup
+import logging
+import os
+from dataclasses import asdict
+from os.path import exists, join
+from typing import Any, Dict
+
+import hivemind
+import jieba
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+import torch.multiprocessing
+import transformers
+from datasets import load_from_disk
+from sklearn.model_selection import train_test_split
+from torch.nn import CrossEntropyLoss, DataParallel
+from torch.nn.utils import clip_grad_norm_
+from torch.optim import Adam
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.tensorboard import SummaryWriter
+from torch_optimizer import Lamb
+from torchtext.data.metrics import bleu_score
+from tqdm import tqdm
 from transformers import (
-    AlbertConfig,
-    AlbertForPreTraining,
-    AlbertTokenizerFast,
     BertTokenizer,
-    DataCollatorForLanguageModeling,
     GPT2Config,
     GPT2LMHeadModel,
     GPT2Tokenizer,
@@ -23,53 +32,28 @@ from transformers import (
     get_cosine_schedule_with_warmup,
     set_seed,
 )
-from tqdm import tqdm
-from torchtext.data.metrics import bleu_score
-from torch_optimizer import Lamb
-from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader, Dataset
-from torch.optim import Adam
-from torch.nn.utils import clip_grad_norm_
-from torch.nn import CrossEntropyLoss, DataParallel
-from sklearn.model_selection import train_test_split
-from datasets import load_from_disk
-import transformers
-import torch.multiprocessing
-import torch
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import jieba
-import hivemind
-from typing import Any, Dict
-from pathlib import Path
-from os.path import exists, join
-from itertools import chain, zip_longest
-from datetime import datetime
-from dataclasses import asdict
-import sys
-import shutil
-import re
-import random
-import os
-import logging
-import json
-import argparse
+from transformers.optimization import get_linear_schedule_with_warmup
+from transformers.trainer import Trainer
+from transformers.trainer_utils import is_main_process
+
+import metrics_utils
+from arguments import (
+    CollaborationArguments,
+    GPT2TrainingArguments,
+    GPT2ConfigArgs,
+)
+from utils import Adam_GC
+
 # import debugpy
 # debugpy.listen(5678)
 # debugpy.wait_for_client()
 # debugpy.breakpoint()
-
-
-# adv
-
 
 tqdm.pandas()
 PAD = "[PAD]"
 pad_id = 0
 
 torch.multiprocessing.set_sharing_strategy("file_system")
-
 logger = logging.getLogger(__name__)
 
 
@@ -85,6 +69,7 @@ class MyDataset(Dataset):
         return len(self.data_list)
 
 
+# Adopt and modified from transformers.TrainerCallback
 class CollaborativeCall:
     def __init__(
         self,
@@ -117,10 +102,17 @@ class CollaborativeCall:
         self.loss += loss_train
         self.steps += 1
 
-        if self.collaborative_optimizer.local_step != self.last_reported_collaboration_step:
-            self.last_reported_collaboration_step = self.collaborative_optimizer.local_step
+        if (
+            self.collaborative_optimizer.local_step
+            != self.last_reported_collaboration_step
+        ):
+            self.last_reported_collaboration_step = (
+                self.collaborative_optimizer.local_step
+            )
             self.total_samples_processed += self.samples
-            samples_per_second = self.collaborative_optimizer.performance_ema.samples_per_second
+            samples_per_second = (
+                self.collaborative_optimizer.performance_ema.samples_per_second
+            )
 
             statistics = metrics_utils.LocalMetrics(
                 step=self.collaborative_optimizer.local_step,
@@ -147,7 +139,8 @@ class CollaborativeCall:
                     key=self.collaborative_optimizer.prefix + "_metrics",
                     subkey=self.local_public_key,
                     value=statistics.dict(),
-                    expiration_time=hivemind.get_dht_time() + self.statistics_expiration,
+                    expiration_time=hivemind.get_dht_time()
+                    + self.statistics_expiration,
                     return_future=True,
                 )
 
@@ -261,8 +254,7 @@ class dialogpt:
             # Remove all tokens with a probability less than the last token of the top-k
             # torch.topk()返回最后一维最大的top_k个元素，返回值为二维(values,indices)
             # ...表示其他维度由计算机自行推断
-            indices_to_remove = logits < torch.topk(logits, top_k)[
-                0][..., -1, None]
+            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
             # 对于topk之外的其他元素的logits值设为负无穷
             logits[indices_to_remove] = filter_value
 
@@ -270,8 +262,7 @@ class dialogpt:
             sorted_logits, sorted_indices = torch.sort(
                 logits, descending=True
             )  # 对logits进行递减排序
-            cumulative_probs = torch.cumsum(
-                F.softmax(sorted_logits, dim=-1), dim=-1)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
 
             # Remove tokens with cumulative probability above the threshold
             sorted_indices_to_remove = cumulative_probs > top_p
@@ -305,11 +296,11 @@ class dialogpt:
         optimizer = Adam_GC(optimizer_grouped_parameters, lr=self.args.lr)
         return optimizer
 
-    def get_collaborative_opt(self):
-        return self.collaborative_opt
-
     def set_collaborative_opt(self, collaborative_opt):
         self.collaborative_opt = collaborative_opt
+
+    def get_collaborative_opt(self):
+        return self.collaborative_opt
 
     def set_collaborative_call(self, collaborative_call):
         self.collaborative_call = collaborative_call
@@ -317,27 +308,23 @@ class dialogpt:
     def get_scheduler(self, optimizer):
         cosine_warmup_schedule = get_cosine_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=int(self.args.epochs *
-                                 self.args.warmup_proportion),
+            num_warmup_steps=int(self.args.epochs * self.args.warmup_proportion),
             num_training_steps=self.args.epochs,
             num_cycles=0.5,
             last_epoch=-1,
         )
-
         return cosine_warmup_schedule
 
     def train(self):
-        # DHT peer
+        # DHT peer, collaborative call on train begin:
         self.collaborative_call.on_train_begin()
 
-        saved_token_train = pd.read_csv(
-            self.args.saved_token_train)["token_list"]
+        saved_token_train = pd.read_csv(self.args.saved_token_train)["token_list"]
         saved_token_train = saved_token_train[
             saved_token_train.apply(lambda x: len(x) <= self.args.max_len - 5)
         ]
         # add validation data
-        saved_token_valid = pd.read_csv(
-            self.args.saved_token_valid)["token_list"]
+        saved_token_valid = pd.read_csv(self.args.saved_token_valid)["token_list"]
         saved_token_valid = saved_token_valid[
             saved_token_valid.apply(lambda x: len(x) <= self.args.max_len - 5)
         ]
@@ -359,8 +346,7 @@ class dialogpt:
         print("prepare dataloader...")
         dataset = MyDataset(train_tensor_list)
         valid_dataset = MyDataset(valid_tensor_list)
-        dataloader = DataLoader(
-            dataset, batch_size=self.args.batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=self.args.batch_size, shuffle=True)
         valid_dataloader = DataLoader(
             valid_dataset, batch_size=self.args.batch_size, shuffle=False
         )
@@ -368,12 +354,16 @@ class dialogpt:
 
         # GPU
         print("setup gpu")
+        # todo
         # self.model = torch.nn.DataParallel(self.model)
         self.model.cuda()
 
         # Prepare optimizer
         print("setup optimizer...")
-        # optimizer = self.get_opt()
+        # collaborative opt (contains scheduler update step)
+        optimizer = self.get_collaborative_opt()
+        # todo
+        # how to define the scheduler here?
 
         loss_fct = CrossEntropyLoss(ignore_index=pad_id, reduction="sum")
 
@@ -386,11 +376,6 @@ class dialogpt:
         train_plot_record = []
         valid_plot_record = []
 
-        # collaborative opt
-        optimizer = self.get_collaborative_opt()
-        # cos warmup
-        cosine_warmup_schedule = self.get_scheduler(optimizer)
-
         for epoch in range(self.args.epochs):
             self.model.train()
             _loss = []
@@ -402,18 +387,19 @@ class dialogpt:
                 shift_logits = logits[..., :-1, :].contiguous()
                 shift_labels = batch[..., 1:].contiguous().cuda()
                 loss = loss_fct(
-                    shift_logits.view(-1, shift_logits.size(-1)
-                                      ), shift_labels.view(-1)
+                    shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
                 )
                 loss.backward()
                 _loss.append(loss.item())
                 # gradient clip
-                clip_grad_norm_(self.model.parameters(),
-                                self.args.max_clip_norm)
+                clip_grad_norm_(self.model.parameters(), self.args.max_clip_norm)
                 optimizer.step()
                 # free might_accumulatd tensors for OOM
                 del batch, output, logits
-                cosine_warmup_schedule.step()
+                # Since we are using a global optimizer, so the update
+                # frequence depends on the global step rule.
+                # cosine_warmup_schedule.step()
+
                 # Hivemind collaborative
                 self.collaborative_call.on_step_end(loss_train=loss.item())
 
@@ -530,20 +516,16 @@ def setup_logging(training_args):
 
 
 def main():
-    parser = HfArgumentParser((GPT2TrainingArguments, CollaborationArguments))
-    training_args, collaboration_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser(
+        (GPT2TrainingArguments, CollaborationArguments, GPT2ConfigArgs)
+    )
+    (
+        training_args,
+        collaboration_args,
+        gpt2_config_args,
+    ) = parser.parse_args_into_dataclasses()
 
-    dialo = dialogpt(training_args)
-    # make tokenize
-    if training_args.make_tokenize:
-        print("tokenizing raw data")
-        dialo.tokenize_raw_data()
-        print(
-            "tokenizing finished. Saved to {}".format(
-                training_args.saved_token_train)
-        )
-        # tokenizing finished. Saved to gpt2/data/tokenized_train.csv
-
+    # check collaboration_args first.
     logger.info(
         f"Found {len(collaboration_args.initial_peers)} initial peers: {collaboration_args.initial_peers}"
     )
@@ -552,18 +534,30 @@ def main():
             "Please specify at least one network endpoint in initial peers."
         )
 
+    # define gpt2
+    dialo = dialogpt(gpt2_config_args)
+
+    # make tokenize
+    if gpt2_config_args.make_tokenize:
+        print("tokenizing raw data")
+        dialo.tokenize_raw_data()
+        # print: tokenizing finished. Saved to gpt2/data/tokenized_train.csv
+        print(
+            "tokenizing finished. Saved to {}".format(
+                gpt2_config_args.saved_token_train
+            )
+        )
+
     collaboration_args_dict = asdict(collaboration_args)
     setup_logging(training_args)
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    opt = dialo.get_opt()
-    scheduler = dialo.get_scheduler(optimizer=opt)
-
     validators, local_public_key = metrics_utils.make_validators(
         collaboration_args_dict["experiment_prefix"]
     )
+
     dht = hivemind.DHT(
         start=True,
         initial_peers=collaboration_args_dict.pop("initial_peers"),
@@ -573,19 +567,21 @@ def main():
         record_validators=validators,
     )
 
+    # gradient_accumulation_steps
+    # Number of updates steps to accumulate the gradients for,
+    # before performing a backward/update pass.
     total_batch_size_per_step = (
         training_args.per_device_train_batch_size
         * training_args.gradient_accumulation_steps
     )
-    statistics_expiration = collaboration_args_dict.pop(
-        "statistics_expiration")
+
+    statistics_expiration = collaboration_args_dict.pop("statistics_expiration")
     adjusted_target_batch_size = collaboration_args_dict.pop(
         "target_batch_size"
     ) - collaboration_args_dict.pop("batch_size_lead")
 
-    # input related to model:
-    # 1. optimizer: opt
-    # 2. scheduler
+    opt = dialo.get_opt()
+    scheduler = dialo.get_scheduler(optimizer=opt)
     collaborative_optimizer = hivemind.CollaborativeOptimizer(
         opt=opt,
         dht=dht,
@@ -616,6 +612,7 @@ def main():
 
     # start gpt2 training
     dialo.train()
+
     if dialo.tb_writer:
         dialo.tb_writer.close()
 

@@ -1,5 +1,5 @@
-from typing import Optional, List
 from dataclasses import dataclass, field
+from typing import List, Optional
 
 from transformers import TrainingArguments
 
@@ -28,13 +28,15 @@ class BaseTrainingArguments:
 @dataclass
 class AveragerArguments:
     averaging_expiration: float = field(
-        default=5.0,
+        default=5000_000.0,  # debug
+        # default=5.0,
         metadata={
             "help": "Averaging group will wait for stragglers for at most this many seconds"
         },
     )
     averaging_timeout: float = field(
-        default=30.0,
+        default=5000_000.0,  # debug
+        # default=30.0,
         metadata={"help": "Give up on averaging step after this many seconds"},
     )
     listen_on: str = field(
@@ -50,7 +52,8 @@ class AveragerArguments:
         },
     )
     max_refresh_period: float = field(
-        default=30,
+        default=5000_000,  # debug
+        # default=30,
         metadata={
             "help": "Wait for at most this many seconds before fetching new collaboration state"
         },
@@ -63,8 +66,7 @@ class AveragerArguments:
     )
     expected_drift_peers: float = field(
         default=3,
-        metadata={
-            "help": "Trainer assumes that this many new peers can join per step"},
+        metadata={"help": "Trainer assumes that this many new peers can join per step"},
     )
     expected_drift_rate: float = field(
         default=0.2,
@@ -79,10 +81,13 @@ class AveragerArguments:
         },
     )
     target_group_size: int = field(
-        default=256, metadata={"help": "Maximum group size for all-reduce"}
+        default=256,  # debug
+        # default=256,
+        metadata={"help": "Maximum group size for all-reduce"},
     )
     metadata_expiration: float = field(
-        default=30,
+        default=5000_000,
+        # default=30, # debug
         metadata={
             "help": "Peer's metadata will be removed if not updated in this many seconds"
         },
@@ -93,7 +98,7 @@ class AveragerArguments:
 class CollaborativeOptimizerArguments:
     target_batch_size: int = field(
         # default=4096,
-        default=256,  # debug
+        default=512,  # debug
         metadata={
             "help": "Perform optimizer step after all peers collectively accumulate this many samples"
         },
@@ -118,8 +123,7 @@ class CollaborativeOptimizerArguments:
     )
     compression: str = field(
         default="FLOAT16",
-        metadata={
-            "help": "Use this compression when averaging parameters/gradients"},
+        metadata={"help": "Use this compression when averaging parameters/gradients"},
     )
 
 
@@ -139,51 +143,6 @@ class CollaborationArguments(
             "help": "This node's IP for inbound connections, used when running from behind a proxy"
         },
     )
-
-
-@dataclass
-class DatasetArguments:
-    dataset_path: Optional[str] = field(
-        default="data/albert_tokenized_wikitext",
-        metadata={"help": "Path to the tokenized dataset"},
-    )
-    tokenizer_path: Optional[str] = field(
-        default="data/tokenizer", metadata={"help": "Path to the tokenizer"}
-    )
-    config_path: Optional[str] = field(
-        default="https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v2-config.json",
-        metadata={"help": "Path to the model config"},
-    )
-    cache_dir: Optional[str] = field(
-        default="data", metadata={"help": "Path to the cache"}
-    )
-
-
-@dataclass
-class AlbertTrainingArguments(TrainingArguments):
-    dataloader_num_workers: int = 4
-    per_device_train_batch_size: int = 4
-    per_device_eval_batch_size: int = 4
-    gradient_accumulation_steps: int = 2
-    seq_length: int = 512
-
-    max_steps: int = 1_000_000  # Albert is actually ready after 125000 steps
-    learning_rate: float = 0.00176
-    warmup_steps: int = 5000
-    adam_epsilon: float = 1e-6
-    weight_decay: float = 0.01
-    max_grad_norm: float = 1.0
-    clamp_value: float = 10000.0
-
-    fp16: bool = True
-    fp16_opt_level: str = "O2"
-    do_train: bool = True
-
-    logging_steps: int = 100
-    save_total_limit: int = 2
-    save_steps: int = 500
-
-    output_dir: str = "outputs"
 
 
 @dataclass
@@ -212,6 +171,10 @@ class GPT2TrainingArguments(TrainingArguments):
 
     output_dir: str = "outputs"
 
+
+@dataclass
+class GPT2ConfigArgs:
+    # config args from GPT2 prj
     raw_train_csv: str = "data/train.csv"
     raw_valid_csv: str = "data/valid.csv"
     config: str = "config/model_config_dialogue_small.json"

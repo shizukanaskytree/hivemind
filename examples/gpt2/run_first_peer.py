@@ -1,7 +1,8 @@
-# import debugpy
-# debugpy.listen(5678)
-# debugpy.wait_for_client()
-# debugpy.breakpoint()
+import debugpy
+
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
 import argparse
 import json
@@ -54,6 +55,7 @@ from arguments import (
     AveragerArguments,
     BaseTrainingArguments,
     CollaborativeOptimizerArguments,
+    GPT2ConfigArgs,
 )
 from utils import Adam_GC
 
@@ -61,7 +63,7 @@ tqdm.pandas()
 PAD = "[PAD]"
 pad_id = 0
 
-torch.multiprocessing.set_sharing_strategy('file_system')
+torch.multiprocessing.set_sharing_strategy("file_system")
 logger = get_logger(__name__)
 
 
@@ -107,14 +109,14 @@ class CoordinatorArguments(BaseTrainingArguments):
     )
     upload_interval: Optional[float] = field(
         default=None,
-        metadata={
-            "help": "Coordinator will upload model once in this many seconds"},
+        metadata={"help": "Coordinator will upload model once in this many seconds"},
     )
 
 
 class CheckpointHandler:
     def __init__(
         self,
+        gpt2_config_args: GPT2ConfigArgs,
         coordinator_args: CoordinatorArguments,
         collab_optimizer_args: CollaborativeOptimizerArguments,
         averager_args: AveragerArguments,
@@ -127,21 +129,19 @@ class CheckpointHandler:
         self.upload_interval = coordinator_args.upload_interval
         self.previous_step = -1
 
-        config = GPT2Config.from_json_file(
-            "./config/model_config_dialogue_small.json"
-        )
+        config = GPT2Config.from_json_file(gpt2_config_args.config)
         self.model = GPT2LMHeadModel(config=config)
 
         no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
         param_optimizer = list(self.model.named_parameters())
-        # todo
+
         optimizer_grouped_parameters = [
             {
                 "params": [
                     p for n, p in param_optimizer if not any(nd in n for nd in no_decay)
                 ],
-                "weight_decay": 1e-7,
-            },  # hardcode now
+                "weight_decay": gpt2_config_args.weight_decay,
+            },
             {
                 "params": [
                     p for n, p in param_optimizer if any(nd in n for nd in no_decay)
@@ -150,8 +150,7 @@ class CheckpointHandler:
             },
         ]
 
-        # todo
-        opt = Adam_GC(optimizer_grouped_parameters, lr=1e-6)  # hardcode
+        opt = Adam_GC(optimizer_grouped_parameters, lr=gpt2_config_args.lr)
 
         adjusted_target_batch_size = (
             collab_optimizer_args.target_batch_size
@@ -202,8 +201,7 @@ class CheckpointHandler:
         )
         self.previous_timestamp = time.time()
         try:
-            subprocess.run("git add --all", shell=True,
-                           check=True, cwd=self.repo_path)
+            subprocess.run("git add --all", shell=True, check=True, cwd=self.repo_path)
             current_step = (
                 self.collaborative_optimizer.collaboration_state.optimizer_step
             )
@@ -213,30 +211,36 @@ class CheckpointHandler:
                 check=True,
                 cwd=self.repo_path,
             )
-            subprocess.run("git push", shell=True,
-                           check=True, cwd=self.repo_path)
+            subprocess.run("git push", shell=True, check=True, cwd=self.repo_path)
         except subprocess.CalledProcessError as e:
             logger.warning("Error while uploading model:", e.output)
 
 
 if __name__ == "__main__":
     parser = HfArgumentParser(
-        (CoordinatorArguments, CollaborativeOptimizerArguments, AveragerArguments)
+        (
+            CoordinatorArguments,
+            CollaborativeOptimizerArguments,
+            AveragerArguments,
+            GPT2ConfigArgs,
+        )
     )
+
     (
         coordinator_args,
         collab_optimizer_args,
         averager_args,
+        gpt2_config_args,
     ) = parser.parse_args_into_dataclasses()
 
     if coordinator_args.address is None:
-        logger.warning(
-            "No address specified. Attempting to infer address from DNS.")
+        logger.warning("No address specified. Attempting to infer address from DNS.")
         coordinator_args.address = get_ip(GoogleDnsProvider)
 
     experiment_prefix = coordinator_args.experiment_prefix
-    validators, local_public_key = metrics_utils.make_validators(
-        experiment_prefix)
+
+    validators, local_public_key = metrics_utils.make_validators(experiment_prefix)
+
     dht = hivemind.DHT(
         start=True,
         listen_on=coordinator_args.dht_listen_on,
@@ -253,17 +257,19 @@ if __name__ == "__main__":
     current_step = 0
 
     checkpoint_handler = CheckpointHandler(
-        coordinator_args, collab_optimizer_args, averager_args, dht
+        gpt2_config_args, coordinator_args, collab_optimizer_args, averager_args, dht
     )
 
     while True:
         metrics_dict = dht.get(experiment_prefix + "_metrics", latest=True)
+
         if metrics_dict is not None:
             metrics_dict = metrics_dict.value
             metrics = [
                 metrics_utils.LocalMetrics.parse_obj(metrics_dict[peer].value)
                 for peer in metrics_dict
             ]
+
             latest_step = max(item.step for item in metrics)
             if latest_step != current_step:
                 current_step = latest_step
@@ -295,6 +301,8 @@ if __name__ == "__main__":
                     checkpoint_handler.save_state(current_step)
                     if checkpoint_handler.is_time_to_upload():
                         checkpoint_handler.upload_checkpoint(current_loss)
+
                 logger.info(f"Step #{current_step}\tloss = {current_loss:.5f}")
+
         logger.debug("Peer is still alive...")
         time.sleep(coordinator_args.refresh_period)
