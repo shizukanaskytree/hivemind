@@ -157,6 +157,7 @@ class CheckpointHandler:
             - collab_optimizer_args.batch_size_lead
         )
 
+        # target_batch_size: perform optimizer step after all peers collectively accumulate this many samples
         self.collaborative_optimizer = hivemind.CollaborativeOptimizer(
             opt=opt,
             dht=dht,
