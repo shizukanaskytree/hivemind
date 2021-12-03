@@ -74,10 +74,11 @@ What is the design?
 ./moe/client/beam_search.py:233:    ) -> Union[List[RemoteExpert], MPFuture[RemoteExpert]]:
 """
 
-
 # flavour types
 ResultType = TypeVar("ResultType")
+
 PID, UID, State, PipeEnd = int, int, str, mp.connection.Connection
+
 ALL_STATES = base.PENDING, base.RUNNING, base.FINISHED, base.CANCELLED, base.CANCELLED_AND_NOTIFIED
 # 这个是一个状态机吗?
 
@@ -95,7 +96,8 @@ except ImportError:
 
 class SharedBytes:
     """
-    A process-wide object that allocates large chunks of shared memory and partitions it into individual bytes.
+    A process-wide object that allocates large chunks of shared memory and 
+    partitions it into individual bytes.
 
     Note: this process is only responsible for bulk allocation, it does not manage/free unused bytes.
     The chunks are deallocated by the garbage collector,
@@ -132,6 +134,44 @@ class SharedBytes:
             return cls._buffer[cls._index - 1]
             # 怎么弄, cls._index 都是 0
             # 
+    """
+    记一次测试.
+
+    self._origin_pid
+    2145657
+    self._uid
+    51395721929927224078887597689317331691
+
+
+    cls._pid
+    None
+
+
+    buffer_size
+    16
+
+
+    cls._pid
+    2145657
+
+
+    cls._buffer
+    tensor([123,  86, 244,  39, 235, 122, 146,  74,  48,  52, 227, 206, 167, 127,
+            0,   0], dtype=torch.uint8)
+
+
+    cls._buffer.size()
+    torch.Size([16])
+
+
+    cls._index
+    1
+
+
+    cls._buffer[cls._index - 1]
+    tensor(123, dtype=torch.uint8)
+    """
+
 
 
 class UpdateType(Enum):
@@ -154,13 +194,9 @@ class MPFuture(base.Future, Generic[ResultType]):
     # Future instances are created by Executor.submit().
     # https://docs.python.org/3/library/concurrent.futures.html#future-objects
     
-    
     # 使用的场景应该是和 base.Future 一样的吧?
     # 用例: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.Future.result
     # 好像不太一样.
-    
-    
-    
     
     """
     功能:
@@ -168,7 +204,6 @@ class MPFuture(base.Future, Generic[ResultType]):
     
     **Any process** can access future status and set the result / exception and check for state.
     However, only the original process (i.e. the process that created the future) can await the result or exception.
-
 
     study syntax:
     :param VAR:
@@ -182,7 +217,6 @@ class MPFuture(base.Future, Generic[ResultType]):
       - lock
       - concurrent writes
       - pipe
-      
 
     :note: This is an internal primitive that is not guaranteed to work outside of hivemind applications.
      More specifically, there are two known limitations:
@@ -223,24 +257,101 @@ class MPFuture(base.Future, Generic[ResultType]):
         # If all you want is a unique ID, you should probably call uuid1() or uuid4()
         # https://docs.python.org/3/library/uuid.html
         self._origin_pid, self._uid = os.getpid(), uuid.uuid4().int
+        # The process who creates this Future is the original pid with a unique id.
         
         self._shared_state_code = SharedBytes.next()
         
         self._state_cache: Dict[State, State] = {}
         # mapping from global to cached local future used that makes updates immediately
-        # available on setter side; dictionary-based cache works because future can visit any state at most once
+        # available on setter side; dictionary-based cache works because future can visit 
+        # any state at most once
         # State IS str
 
-        base.Future.__init__(self)  # parent init is deferred because it uses self._shared_state_code
+        base.Future.__init__(self)  
+        # parent init is deferred because it uses self._shared_state_code
+        # ========================
+        # class Future(object):
+        #     """Represents the result of an asynchronous computation."""
+        #
+        #     def __init__(self):
+        #         """Initializes the future. Should not be called by clients."""
+        #         self._condition = threading.Condition()
+        #         self._state = PENDING
+        #         self._result = None
+        #         self._exception = None
+        #         self._waiters = []
+        #         self._done_callbacks = []        
+        # 重要:
+        # from:
+        # /home/wxf/anaconda3/envs/hm/lib/python3.8/concurrent/futures/_base.py
+        
+        # self._state = PENDING 会调用 本文件中的这个函数: 
+        #
+        #    @_state.setter
+        #     def _state(self, new_state: State):
+        #         self._shared_state_code[...] = ALL_STATES.index(new_state)
+        #         if self._state in TERMINAL_STATES and self._loop is not None and not self._aio_event.is_set():
+        #             self._set_event_threadsafe()
+        
+        # 分析一下 @_state.setter, _state
+        # 
+        # ALL_STATES
+        # ('PENDING', 'RUNNING', 'FINISHED', 'CANCELLED', 'CANCELLED_AND_NOTIFIED')
+        
+        # new_state
+        # 'PENDING'
+
+        # ALL_STATES.index(new_state)
+        # 0
+                
+        # self._shared_state_code
+        # tensor(144, dtype=torch.uint8)
+        
+        # self._shared_state_code[...]
+        # tensor(144, dtype=torch.uint8)
+
+        # self._state 在 setter 函数里面是有调用
+        # @property
+        # def _state(self) -> State:
+        #     shared_state = ALL_STATES[self._shared_state_code.item()]
+        #     return self._state_cache.get(shared_state, shared_state)
+
+        # self._shared_state_code.item()
+        # https://pytorch.org/docs/stable/generated/torch.Tensor.item.html
+        # Returns the value of this tensor as a standard Python number. 
+        # This only works for tensors with one element. For other cases, see tolist().
+
+        # shared_state
+        # 'PENDING'
+        # ALL_STATES
+        # ('PENDING', 'RUNNING', 'FINISHED', 'CANCELLED', 'CANCELLED_AND_NOTIFIED')
+        
+        # self._state_cache: Dict[State, State] = {}        
         
         self._state, self._result, self._exception = base.PENDING, None, None
         
         self._use_lock = use_lock
 
-        if self._origin_pid != MPFuture._active_pid:
+        """
+        测试: 
+        self._origin_pid
+        2145657
+        MPFuture._active_pid
+        None
+        """
+        if self._origin_pid != MPFuture._active_pid: # 一次检测
             with MPFuture._initialization_lock:
-                if self._origin_pid != MPFuture._active_pid:
-                    # note: the second if is intentional, see https://en.wikipedia.org/wiki/Double-checked_locking
+                # lock it!
+                
+                if self._origin_pid != MPFuture._active_pid: # 两次检测
+                    # note: the second if is intentional, 
+                    # see https://en.wikipedia.org/wiki/Double-checked_locking
+                    # In software engineering, double-checked locking (also known 
+                    # as "double-checked locking optimization"[1]) is a software 
+                    # design pattern used to reduce the overhead of acquiring a 
+                    # lock by testing the locking criterion (the "lock hint") 
+                    # before acquiring the lock. Locking occurs only if the locking 
+                    # criterion check indicates that locking is required.
                     self._initialize_mpfuture_backend()
         
         assert self._uid not in MPFuture._active_futures
@@ -251,7 +362,18 @@ class MPFuture(base.Future, Generic[ResultType]):
 
         try:
             self._loop = asyncio.get_event_loop()
+            # The event loop is the core of every asyncio application. 
+            # Event loops run asynchronous tasks and callbacks, perform 
+            # network IO operations, and run subprocesses.
+            # https://docs.python.org/3/library/asyncio-eventloop.html
+            # Get the current event loop.
+
             self._aio_event = asyncio.Event()
+            # Create an Event object.
+            # An asyncio event can be used to notify multiple asyncio tasks that some event has happened.
+            # An Event object manages an internal flag that can be set to true with the set() method and reset to false with the clear() method. The wait() method blocks until the flag is set to true. The flag is set to false initially.
+            # https://docs.python.org/3/library/asyncio-sync.html#event            
+            
         except RuntimeError:
             self._loop, self._aio_event = None, None
 
@@ -264,10 +386,13 @@ class MPFuture(base.Future, Generic[ResultType]):
 
     # setter
     # https://www.freecodecamp.org/news/python-property-decorator/
+
     @_state.setter
     def _state(self, new_state: State):
         self._shared_state_code[...] = ALL_STATES.index(new_state)
-        if self._state in TERMINAL_STATES and self._loop is not None and not self._aio_event.is_set():
+        if self._state in TERMINAL_STATES and \
+            self._loop is not None and \
+                not self._aio_event.is_set():
             self._set_event_threadsafe()
 
     def _set_event_threadsafe(self):
@@ -276,19 +401,32 @@ class MPFuture(base.Future, Generic[ResultType]):
         try:
             running_loop = asyncio.get_running_loop()
             # Return the running event loop in the current OS thread.
-            # https://docs.python.org/3/library/asyncio-eventloop.html
-            
+            #
+            # If there is no running event loop a RuntimeError is raised. 
+            # This function can only be called from a coroutine or a callback.
+            # https://docs.python.org/3/library/asyncio-eventloop.html            
         except RuntimeError:
             running_loop = None
 
         async def _event_setter():
             self._aio_event.set()
 
+        # 如下都是对 self._loop 做判断. 
         if self._loop.is_closed():
             return  # do nothing, the loop is already closed
 
         elif self._loop.is_running() and running_loop == self._loop:
             asyncio.create_task(_event_setter())
+            # It submits the coroutine to run "in the background", in this example, it is 
+            # _event_setter() function.
+            # i.e.  
+            # concurrently with the current task and all other tasks, switching between them at 
+            # await points. It returns an awaitable handle called a "task" which you 
+            # can also use to cancel the execution of the coroutine.
+            # It's one of the central primitives of asyncio, the asyncio equivalent 
+            # of starting a thread. (In the same analogy, awaiting the task with 
+            # await is the equivalent of joining a thread.)
+            # https://stackoverflow.com/questions/62528272/what-does-asyncio-create-task-do
 
         elif self._loop.is_running() and running_loop != self._loop:
             asyncio.run_coroutine_threadsafe(_event_setter(), self._loop)
@@ -299,18 +437,33 @@ class MPFuture(base.Future, Generic[ResultType]):
     @classmethod
     def _initialize_mpfuture_backend(cls):
         pid = os.getpid()
+        # 测试:
+        # pid
+        # 2145657
+                
         logger.debug(f"Initializing MPFuture backend for pid {pid}")
 
         receiver_pipe, cls._global_sender_pipe = mp.Pipe(duplex=False)
+        # cls._global_sender_pipe 的意思是谁都可以发是吗?
         
         cls._active_pid, cls._active_futures = pid, {}
+        # cls._active_pid 就是本 pid
         
+        # start the thread, launch the function: cls._process_updates_in_background
         cls._pipe_waiter_thread = threading.Thread(
             target=cls._process_updates_in_background, 
             args=[receiver_pipe], 
             name=f"{__name__}.BACKEND", 
             daemon=True
         )
+        # cls._pipe_waiter_thread 是 
+        # cls._pipe_waiter_thread
+        # <Thread(hivemind.utils.mpfuture.BACKEND, started daemon 140184976451328)>
+        # 
+        # __name__
+        # 'hivemind.utils.mpfuture'
+
+        
         cls._pipe_waiter_thread.start()
 
     @staticmethod
@@ -321,10 +474,26 @@ class MPFuture(base.Future, Generic[ResultType]):
         MPFuture._update_lock = mp.Lock()
         SharedBytes._lock = mp.Lock()
 
+    # 这个函数被一个 thread 启动了, 是在 __init__ 里面启动的. 函数里面有一个 loop: while True, infinite loop.
+    # 这个函数做了 
+    # - future.set_result
+    # - future.set_exception
+    # - future.cancel 
+    # 等事情. 
     @classmethod
     def _process_updates_in_background(cls, receiver_pipe: mp.connection.Connection):
-        # mp.connection.Connection
+        # 多线程的 mp.connection.Connection 语法
         # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.Connection
+        
+        # Connection Objects
+        # Connection objects allow the sending and receiving of picklable objects or strings. 
+        # They can be thought of as message oriented connected sockets.
+        # Connection objects are usually created using Pipe – see also Listeners and Clients.
+        
+        # receiver_pipe 是在 _initialize_mpfuture_backend 里.
+        # receiver_pipe, cls._global_sender_pipe = mp.Pipe(duplex=False)
+        # type(receiver_pipe)
+        # <class 'multiprocessing.connection.Connection'>
         
         pid = os.getpid()
         
@@ -333,7 +502,12 @@ class MPFuture(base.Future, Generic[ResultType]):
                 if cls._pipe_waiter_thread is not threading.current_thread():
                     # why this ?
                     break  # backend was reset, a new background thread has started
+                # threading.current_thread()
+                # <Thread(hivemind.utils.mpfuture.BACKEND, started daemon 140184976451328)>
 
+                # cls._pipe_waiter_thread
+                # <Thread(hivemind.utils.mpfuture.BACKEND, started daemon 140184976451328)>
+                # 两者相同
                 
                 uid, update_type, payload = receiver_pipe.recv()
                 # Who send you info?
@@ -361,6 +535,7 @@ class MPFuture(base.Future, Generic[ResultType]):
             except Exception as e:
                 logger.exception(f"Could not retrieve update: caught {repr(e)} (pid={pid})")
 
+
     def _send_update(self, update_type: UpdateType, payload: Any = None):
         # _xxx 表示内部调用
         # yyy 表示对外调用
@@ -378,12 +553,29 @@ class MPFuture(base.Future, Generic[ResultType]):
         except (ConnectionError, BrokenPipeError, EOFError, OSError) as e:
             logger.debug(f"No updates were sent: pipe to origin process was broken ({e}).", exc_info=True)
 
+
     def set_result(self, result: ResultType):
         if os.getpid() == self._origin_pid:
             super().set_result(result)
             # set_result API: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.Future.set_result
             # Sets the result of the work associated with the Future to result.
             MPFuture._active_futures.pop(self._uid, None)
+        
+            # def set_result(self, result):
+            #     """Sets the return value of work associated with the future.
+
+            #     Should only be used by Executor implementations and unit tests.
+            #     """
+            #     with self._condition:
+            #         if self._state in {CANCELLED, CANCELLED_AND_NOTIFIED, FINISHED}:
+            #             raise InvalidStateError('{}: {!r}'.format(self._state, self))
+            #         self._result = result
+            #         self._state = FINISHED        # <= 会结束.
+            #         for waiter in self._waiters:
+            #             waiter.add_result(self)
+            #         self._condition.notify_all()
+            #     self._invoke_callbacks()
+            
             
         elif self._state in TERMINAL_STATES:
             raise InvalidStateError(f"Can't set_result to a future that is {self._state} ({self._uid})")
@@ -471,7 +663,10 @@ class MPFuture(base.Future, Generic[ResultType]):
     def __await__(self):
         if not self._aio_event:
             raise RuntimeError("Can't await: MPFuture was created with no event loop")
+
         yield from self._aio_event.wait().__await__()
+        # 不懂
+        
         try:
             return super().result()
         except base.CancelledError:
