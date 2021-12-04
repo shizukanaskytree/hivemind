@@ -1,3 +1,8 @@
+"""
+1. 
+
+"""
+
 import logging
 import os
 import sys
@@ -5,6 +10,7 @@ import threading
 from enum import Enum
 from typing import Optional, Union
 
+# 默认的就是 logging.WARNING level 了. 
 logging.addLevelName(logging.WARNING, "WARN")
 
 loglevel = os.getenv("HIVEMIND_LOGLEVEL", "INFO")
@@ -23,6 +29,10 @@ class HandlerMode(Enum):
 
 
 _init_lock = threading.RLock()
+# 用锁的地方都是为了避免多线程的冲突
+# 第一次比如从 mpfuture.py 里面用到了 get_logger 后
+# 就能够初始化这个 _init_lock 
+
 _current_mode = HandlerMode.IN_HIVEMIND
 _default_handler = None
 
@@ -46,12 +56,6 @@ class TextStyle:
 
 
 class CustomFormatter(logging.Formatter):
-    # https://docs.python.org/3/library/logging.html#logging.Formatter
-    # 
-    # https://docs.python.org/3/howto/logging-cookbook.html
-    # eg.
-    # formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
     """
     A formatter that allows a log time and caller info to be overridden via
     ``logger.log(level, message, extra={"origin_created": ..., "caller": ...})``.
@@ -76,27 +80,51 @@ class CustomFormatter(logging.Formatter):
 
         # Aliases for the format argument
         record.levelcolor = self._LEVEL_TO_COLOR[record.levelno]
-        record.bold = TextStyle.BOLD
+        record.bold = TextStyle.BOLD    # KeyError: 'bold' if I comment it, 所以这个 attribute 是自定义的.
         record.reset = TextStyle.RESET
 
         return super().format(record)
 
 
 def _initialize_if_necessary():
+    """
+    如果是我来些这个函数名, 我会写 init_handler_if_necessary()
+    """
+    # 第一次会进入 logging.StreamHandler(), 第二次不会.
     global _current_mode, _default_handler
 
     with _init_lock:
+        
+        # 第二次不会进入
         if _default_handler is not None:
             return
 
+        # 第一次会进入
         formatter = CustomFormatter(
             fmt="{asctime}.{msecs:03.0f} [{bold}{levelcolor}{levelname}{reset}] [{bold}{caller}{reset}] {message}",
             style="{",
             datefmt="%b %d %H:%M:%S",
         )
+        """
+        formatter
+        
+        <lego.utils.custom_logging.CustomFormatter object at 0x7faae3c0d610>
+        special variables:
+        function variables:
+        
+        datefmt: '%b %d %H:%M:%S'
+        default_msec_format: '%s,%03d'
+        default_time_format: '%Y-%m-%d %H:%M:%S'
+        _LEVEL_TO_COLOR: {10: '\x1b[35m', 20: '\x1b[34m', 30: '\x1b[38;5;208m', 40: '\x1b[31m', 50: '\x1b[31m'}
+        _fmt: '{asctime}.{msecs:03.0f} [{bold}{levelcolor}{levelname}{reset}] [{bold}{caller}{reset}] {message}'
+        _style: <logging.StrFormatStyle object at 0x7faae3c0d040>
+        """
+        
         _default_handler = logging.StreamHandler()
         _default_handler.setFormatter(formatter)
 
+        # 这个 logger name 只会被调用一次.
+        # 名字定死了.
         _enable_default_handler("hivemind")
 
 
@@ -109,13 +137,26 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
            If you want to extend this handler to other loggers in your application, call
            ``use_hivemind_log_handler("in_root_logger")``.
     """
-
+    # 你会发现展开来写是不行的, 因为有的地方返回值有限定
     _initialize_if_necessary()
-    t = logging.getLogger(name)
-    return t
+    
+    # logging.getLogger
+    # create logger with "name"
+    # https://docs.python.org/3/howto/logging-cookbook.html        
+    return logging.getLogger(name)
 
 
 def _enable_default_handler(name: str) -> None:
+    """
+    name
+    'hivemind'
+    
+    logger
+    <Logger hivemind (WARN)>
+    
+    loglevel
+    'INFO'
+    """
     logger = get_logger(name)
     logger.addHandler(_default_handler)
     logger.propagate = False
