@@ -22,8 +22,13 @@ from hivemind.utils.logging import get_logger
 logger = get_logger(__name__)
 
 """
+evaluation comment:
+这个还需要一直看, 一直看, 感觉不懂.
+
+
 What is the design?
 ===================
+可能是带有
 异步执行模块
 - set result 
 - get result
@@ -106,10 +111,12 @@ class SharedBytes:
 
     _lock = mp.Lock()
     _pid: Optional[PID] = None
+    # 初始的 pid 就是 None 
     # PID is int
     # Optional: https://stackoverflow.com/questions/51710037/how-should-i-use-the-optional-type-hint
     
     _buffer: Optional[torch.Tensor] = None
+    # ...
     
     _index: int = 0
     # ?
@@ -119,7 +126,18 @@ class SharedBytes:
         """Create another shared byte value, represented as a scalar uint8 tensor"""
         with cls._lock:
             if cls._pid != os.getpid() or cls._buffer is None or cls._index >= len(cls._buffer):
+                # 1.
                 # 想象成电路逻辑图, 超级爽. 
+                
+                # 2.
+                # len(cls._buffer)
+                # 16
+                
+                # 3. 
+                # 初始情况, 
+                # cls._pid 是 None
+                # cls._buffer 是 None
+                
                 buffer_size = int(os.environ.get("HIVEMIND_SHM_BUFFER_SIZE", 16))
                 # print(os.getenv('KEY_THAT_MIGHT_EXIST', default_value))
 
@@ -127,6 +145,11 @@ class SharedBytes:
                 cls._buffer = torch.empty([buffer_size], dtype=torch.uint8).share_memory_()
                 # share_memory_
                 # https://pytorch.org/docs/stable/generated/torch.Tensor.share_memory_.html
+                # 
+                # tensor.share_memory_() will move the tensor data to shared memory on the host so that it can be shared between multiple processes. 
+                # The Wikipedia article 89 explains shared memory maybe a bit easier to understand.
+                # It’s basically a memory pool, which can be used by multiple processes to exchange information and data.
+                # https://discuss.pytorch.org/t/what-is-the-shared-memory/112212
 
                 cls._index = 0
 
@@ -184,11 +207,13 @@ class UpdateType(Enum):
 
 class MPFuture(base.Future, Generic[ResultType]):
     # 为什么要继承自 Generic[ResultType] 呢? 看上面的用例
+    # ResultType is the value type of set_result() and result()
 
     # Future 功能应该就是 MPFuture 的功能. 
     # concurrent.futures
     # https://docs.python.org/3/library/concurrent.futures.html 
-    # The concurrent.futures module provides a high-level interface for asynchronously executing callables.
+    # The concurrent.futures module provides a high-level interface for asynchronously
+    # executing callables.
 
     # The Future class encapsulates the asynchronous execution of a callable. 
     # Future instances are created by Executor.submit().
@@ -218,7 +243,9 @@ class MPFuture(base.Future, Generic[ResultType]):
       - concurrent writes
       - pipe
 
-    :note: This is an internal primitive that is not guaranteed to work outside of hivemind applications.
+    :note: This is an internal primitive that is not guaranteed to work outside of hivemind 
+            applications.
+            
      More specifically, there are two known limitations:
        - MPFuture works between processes created through inheritance (e.g. fork), *not* for independent processes
        - MPFuture is deterministic if only one process can call set_result/set_exception/set_running_or_notify_cancel
@@ -234,6 +261,8 @@ class MPFuture(base.Future, Generic[ResultType]):
     _initialization_lock = mp.Lock()  
     # global lock that prevents simultaneous initialization of two processes
     # import multiprocessing as mp
+    
+    # 这个锁用在 __init__ 函数里面.
     
     _update_lock = mp.Lock()  
     # global lock that prevents simultaneous writing to the same pipe
@@ -340,6 +369,8 @@ class MPFuture(base.Future, Generic[ResultType]):
         None
         """
         if self._origin_pid != MPFuture._active_pid: # 一次检测
+            # MPFuture._active_pid is None
+            # 
             with MPFuture._initialization_lock:
                 # lock it!
                 
@@ -352,6 +383,9 @@ class MPFuture(base.Future, Generic[ResultType]):
                     # lock by testing the locking criterion (the "lock hint") 
                     # before acquiring the lock. Locking occurs only if the locking 
                     # criterion check indicates that locking is required.
+                    # 
+                    # https://www.cs.cornell.edu/courses/cs6120/2019fa/blog/double-checked-locking/
+                    # 这个可以告诉你在干什么. 
                     self._initialize_mpfuture_backend()
         
         assert self._uid not in MPFuture._active_futures
@@ -379,8 +413,7 @@ class MPFuture(base.Future, Generic[ResultType]):
 
     @property
     def _state(self) -> State:
-        # State IS str, 什么用途?
-        # AAA: 
+        # State IS str, 什么用途?        
         shared_state = ALL_STATES[self._shared_state_code.item()]
         return self._state_cache.get(shared_state, shared_state)
 
@@ -397,7 +430,8 @@ class MPFuture(base.Future, Generic[ResultType]):
 
     def _set_event_threadsafe(self):
         # 函数的目的是什么?
-        # 
+        # 不会写, 不会
+        # 不会写
         try:
             running_loop = asyncio.get_running_loop()
             # Return the running event loop in the current OS thread.
@@ -430,12 +464,18 @@ class MPFuture(base.Future, Generic[ResultType]):
 
         elif self._loop.is_running() and running_loop != self._loop:
             asyncio.run_coroutine_threadsafe(_event_setter(), self._loop)
+            # 不会
+            # asyncio 都不会. 
 
         else:
             self._loop.run_until_complete(_event_setter())
+            # 
 
     @classmethod
     def _initialize_mpfuture_backend(cls):
+        # 为什么要这个函数?
+        # 这个函数是干什么的?
+        
         pid = os.getpid()
         # 测试:
         # pid
@@ -462,7 +502,6 @@ class MPFuture(base.Future, Generic[ResultType]):
         # 
         # __name__
         # 'hivemind.utils.mpfuture'
-
         
         cls._pipe_waiter_thread.start()
 
@@ -555,6 +594,10 @@ class MPFuture(base.Future, Generic[ResultType]):
 
 
     def set_result(self, result: ResultType):
+        # 这个是核心
+        
+        # 也就是只有 origin process 才能 set_result
+        # 如果不是的话, 进入第三个分支.
         if os.getpid() == self._origin_pid:
             super().set_result(result)
             # set_result API: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.Future.set_result
@@ -576,14 +619,16 @@ class MPFuture(base.Future, Generic[ResultType]):
             #         self._condition.notify_all()
             #     self._invoke_callbacks()
             
-            
         elif self._state in TERMINAL_STATES:
             raise InvalidStateError(f"Can't set_result to a future that is {self._state} ({self._uid})")
         else:
             self._state_cache[self._state], self._result = base.FINISHED, result
             self._send_update(UpdateType.RESULT, result)
 
+
     def set_exception(self, exception: Optional[BaseException]):
+        # 也就是只有 origin process 才能 set_result
+        # 如果不是的话, 进入第三个分支.
         if os.getpid() == self._origin_pid:
             super().set_exception(exception)
             MPFuture._active_futures.pop(self._uid, None)

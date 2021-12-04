@@ -17,7 +17,8 @@ class SharedBytes
 	variable _pid
 	variable _buffer
 	variable _index
-	method next
+
+	method next ✅✅
 		variable buffer_size
 
 class UpdateType
@@ -33,23 +34,23 @@ class MPFuture
 	variable _active_futures
 	variable _active_pid
  
-	method __init__ ✅
+	method __init__ ✅✅
 		variable use_lock
   
 	method _state ✅
 		variable new_state
   
-	method _set_event_threadsafe
+	method _set_event_threadsafe ✅
 		variable running_loop
 		function _event_setter
   
-	method _initialize_mpfuture_backend
+	method _initialize_mpfuture_backend ✅✅
 		variable pid
 		variable receiver_pipe
   
-	method reset_backend
+	method reset_backend ✅
  
-	method _process_updates_in_background ✅
+	method _process_updates_in_background ✅✅
 		variable receiver_pipe
 		variable pid
 		variable uid
@@ -59,7 +60,7 @@ class MPFuture
 		variable future_ref
 		variable e
   
-	method _send_update
+	method _send_update ✅
 		variable update_type
 		variable payload
 		variable e
@@ -67,17 +68,17 @@ class MPFuture
 	method set_result ✅
 		variable result
   
-	method set_exception
+	method set_exception ✅
 		variable exception
   
-	method cancel
+	method cancel ✅
  
 	method set_running_or_notify_cancel
  
 	method result ✅
 		variable timeout
   
-	method exception
+	method exception ✅
 		variable timeout
   
 	method done
@@ -113,51 +114,69 @@ class MPFuture
 	variable _condition
 """
 
-
+import unittest
 from hivemind.utils.mpfuture import SharedBytes, MPFuture 
 
-# import debugpy
-# debugpy.listen(5678)
-# debugpy.wait_for_client()
-# debugpy.breakpoint()
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+debugpy.breakpoint()
 
-sb = SharedBytes
+class TestSharedBytesMethods(unittest.TestCase):  
+    def test_sharedbytes(self):
+        sb = SharedBytes
 
-# =============================================================
+class TestMPFutureMethods(unittest.TestCase):  
+    def test_mpfuture_part1(self):
+        # https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.Future.result
+        
+				# 这个测试完成了接口.
+        mpf = MPFuture()
+        print(mpf._state)
+        cnt = 0
+        mpf.set_result(cnt)
+        self.assertEqual(mpf.result(), 0)
+        mpf.reset_backend()
+        mpf.cancel()
 
-# 初始化
-# ---
-# ./dht/dht.py:75:        self._ready = MPFuture()
-# ./dht/dht.py:171:        future = MPFuture()
-# ./dht/dht.py:204:        future = MPFuture()
-# ---
-# MPFuture[ReturnType], 用中括号表示类型
-# ---
-# MPFuture[RemoteExpert]
+    def test_part2(self):
+        # 初始化
+        # ---
+        # ./dht/dht.py:75:         self._ready = MPFuture()
+        # ./dht/dht.py:171:        future = MPFuture()
+        # ./dht/dht.py:204:        future = MPFuture()
+        # ---
+        # MPFuture[ReturnType], 用中括号表示类型
+        # ---
+        # MPFuture[RemoteExpert]
 
-# mpf = MPFuture()
-# while True:
-#     # 也就是其他 process 可以做.
-#     mpf.set_result(123)
-#     mpf.set_result("abc") # 不能混用
+        mpf = MPFuture()
+        # 也就是其他 process 可以做.
+        mpf.set_result(123)
+        # mpf.set_result("abc") # 不能执行两次 set_result.
 
-"""
-ERROR:
+        """
+        ERROR:
 
-Traceback (most recent call last):
-  File "mpfuture_test.py", line 24, in <module>
-    mpf.set_result("abc")
-  File "/home/wxf/netmind_prj/study_hivemind/hivemind/hivemind/utils/mpfuture.py", line 211, in set_result
-    super().set_result(result)
-  File "/home/wxf/anaconda3/envs/hm/lib/python3.8/concurrent/futures/_base.py", line 532, in set_result
-    raise InvalidStateError('{}: {!r}'.format(self._state, self))
-concurrent.futures._base.InvalidStateError: FINISHED: <MPFuture at 0x7fb1fa586910 state=finished returned int>
-"""
+        Traceback (most recent call last):
+        File "mpfuture_test.py", line 24, in <module>
+            mpf.set_result("abc")
+        File "/home/wxf/netmind_prj/study_hivemind/hivemind/hivemind/utils/mpfuture.py", line 211, in set_result
+            super().set_result(result)
+        File "/home/wxf/anaconda3/envs/hm/lib/python3.8/concurrent/futures/_base.py", line 532, in set_result
+            raise InvalidStateError('{}: {!r}'.format(self._state, self))
+        concurrent.futures._base.InvalidStateError: FINISHED: <MPFuture at 0x7fb1fa586910 state=finished returned int>
+        """        
 
-# https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.Future.result
+    def test_part3(self):
+        mpf = MPFuture()
+        try:
+            raise Exception
+        except Exception as e:
+            print('except...')
+            mpf.set_exception(e)
+            return        
 
-mpf = MPFuture()
-print(mpf._state)
-cnt = 0
-mpf.set_result(cnt)
-print(mpf.result())
+
+if __name__ == '__main__':
+    unittest.main()
