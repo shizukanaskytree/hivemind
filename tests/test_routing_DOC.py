@@ -199,7 +199,7 @@ def test_ids_basic():
         assert DHTID.xor_distance(id1, id2) > 0 or (id1 == id2)
         assert DHTID.from_bytes(bytes(id1)) == id1 and DHTID.from_bytes(id2.to_bytes()) == id2
 
-test_ids_basic()
+# test_ids_basic()
 
 def test_ids_depth():
     for i in range(100):
@@ -210,6 +210,7 @@ def test_ids_depth():
         reference = len(shared_prefix(*ids_bitstr))
         assert reference == ours, f"ours {ours} != reference {reference}, ids: {ids}"
 
+# test_ids_depth()
 
 def test_routing_table_basic():
     node_id = DHTID.generate()
@@ -243,6 +244,8 @@ def test_routing_table_basic():
         else:
             raise ValueError("Naive search could not find bucket. Universe has gone crazy.")
         assert bucket_index == found_bucket_index
+
+test_routing_table_basic()        
 
 
 def test_routing_table_parameters():

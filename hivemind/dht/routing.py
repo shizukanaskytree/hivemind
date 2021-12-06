@@ -282,7 +282,15 @@ class DHTID(int):
 
     @classmethod
     def longest_common_prefix_length(cls, *ids: DHTID) -> int:
-        ids_bits = [bin(uid)[2:].rjust(8 * cls.HASH_NBYTES, "0") for uid in ids]
+        # ids_bits = [bin(uid)[2:].rjust(8 * cls.HASH_NBYTES, "0") for uid in ids]
+
+        # version to debug 
+        ids_bits = []
+        for uid in ids:
+            ids_bits.append(
+                bin(uid)[2:].rjust(8 * cls.HASH_NBYTES, "0")
+            )
+        
         return len(os.path.commonprefix(ids_bits))
 
     def to_bytes(self, length=HASH_NBYTES, byteorder="big", *, signed=False) -> bytes:

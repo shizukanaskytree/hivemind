@@ -1,9 +1,3 @@
-import debugpy
-
-debugpy.listen(5678)
-debugpy.wait_for_client()
-debugpy.breakpoint()
-
 import asyncio
 import concurrent.futures
 import random

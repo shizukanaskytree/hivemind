@@ -1,4 +1,43 @@
 """ A unified interface for several common serialization methods """
+
+"""
+variable logger
+
+class SerializerBase
+	method dumps
+		variable obj
+	method loads
+		variable buf
+  
+class MSGPackSerializer
+	variable _ext_types
+	variable _ext_type_codes
+	constant _TUPLE_EXT_TYPE_CODE
+ 
+	method ext_serializable ✅
+		variable type_code
+		function wrap
+			variable wrapped_type
+   
+	method _encode_ext_types ❔
+		variable obj
+		variable type_code
+		variable data
+  
+	method _decode_ext_types ❔
+		variable type_code
+		variable data
+  
+	method dumps ✅
+		variable obj 
+  
+	method loads ✅
+		variable buf
+"""
+
+
+
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 

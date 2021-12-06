@@ -1,3 +1,118 @@
+"""
+variable logger
+variable ReturnType
+
+
+class DHT
+	variable _node
+	method __init__
+		variable initial_peers
+		variable start
+		variable p2p
+		variable daemon
+		variable num_workers
+		variable record_validators
+		variable shutdown_timeout
+		variable await_ready
+		variable kwargs
+	method run
+		variable loop
+		variable pipe_semaphore
+		function _run
+			variable replicated_p2p
+			variable e
+			variable method
+			variable args
+			variable kwargs
+			variable task
+	method run_in_background
+		variable await_ready
+		variable timeout
+	method wait_until_ready
+		variable timeout
+	method shutdown
+	method _shutdown
+	method get
+		variable key
+		variable latest
+		variable return_future
+		variable kwargs
+		variable future
+	method _get
+		variable key
+		variable latest
+		variable future
+		variable kwargs
+		variable result
+		variable e
+	method store
+		variable key
+		variable value
+		variable expiration_time
+		variable subkey
+		variable return_future
+		variable kwargs
+		variable future
+	method _store
+		variable key
+		variable value
+		variable expiration_time
+		variable subkey
+		variable future
+		variable kwargs
+		variable result
+		variable e
+	method run_coroutine
+		variable coro
+		variable return_future
+		variable future
+	method _run_coroutine
+		variable coro
+		variable future
+		variable e
+	method add_validators
+		variable record_validators
+	method _add_validators
+		variable _dht
+		variable node
+		variable record_validators
+	method peer_id
+	method _get_peer_id
+		variable _dht
+		variable node
+	method client_mode
+	method _get_client_mode
+		variable _dht
+		variable node
+	method get_visible_maddrs
+		variable latest
+	method _get_visible_maddrs
+		variable _dht
+		variable node
+		variable latest
+	method replicate_p2p
+		variable daemon_listen_maddr
+	method _get_p2p_daemon_listen_maddr
+		variable _dht
+		variable node
+	method __del__
+
+	variable _parent_pid
+	variable initial_peers
+	variable kwargs
+	variable num_workers
+	variable _record_validator
+	variable _inner_pipe
+	variable _outer_pipe
+	variable shutdown_timeout
+	variable _ready
+	variable daemon
+	variable _peer_id
+	variable _client_mode
+	variable _p2p_replica
+	variable _daemon_listen_maddr
+"""
+
 from __future__ import annotations
 
 import asyncio
