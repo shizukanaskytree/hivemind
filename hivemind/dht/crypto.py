@@ -1,6 +1,7 @@
 import dataclasses
 import re
 from typing import Optional
+import debugpy
 
 from hivemind.dht.validation import DHTRecord, RecordValidatorBase
 from hivemind.utils import MSGPackSerializer, get_logger
@@ -28,6 +29,7 @@ class RSASignatureValidator(RecordValidatorBase):
     _cached_private_key = None
 
     def __init__(self, private_key: Optional[RSAPrivateKey] = None):
+        #debugpy.breakpoint()
         if private_key is None:
             private_key = RSAPrivateKey.process_wide()
         self._private_key = private_key
@@ -37,9 +39,11 @@ class RSASignatureValidator(RecordValidatorBase):
 
     @property
     def local_public_key(self) -> bytes:
+        #debugpy.breakpoint()
         return self._local_public_key
 
     def validate(self, record: DHTRecord) -> bool:
+        #debugpy.breakpoint()
         public_keys = self._PUBLIC_KEY_RE.findall(record.key)
         if record.subkey is not None:
             public_keys += self._PUBLIC_KEY_RE.findall(record.subkey)
@@ -64,6 +68,7 @@ class RSASignatureValidator(RecordValidatorBase):
         return True
 
     def sign_value(self, record: DHTRecord) -> bytes:
+        #debugpy.breakpoint()
         if self._local_public_key not in record.key and self._local_public_key not in record.subkey:
             return record.value
 
@@ -71,18 +76,22 @@ class RSASignatureValidator(RecordValidatorBase):
         return record.value + self.SIGNATURE_FORMAT.replace(b"_value_", signature)
 
     def strip_value(self, record: DHTRecord) -> bytes:
+        #debugpy.breakpoint()
         return self._SIGNATURE_RE.sub(b"", record.value)
 
     def _serialize_record(self, record: DHTRecord) -> bytes:
+        #debugpy.breakpoint()
         return MSGPackSerializer.dumps(dataclasses.astuple(record))
 
     @property
     def priority(self) -> int:
         # On validation, this validator must be executed before validators
         # that deserialize the record
+        #debugpy.breakpoint()
         return 10
 
     def merge_with(self, other: RecordValidatorBase) -> bool:
+        #debugpy.breakpoint()
         if not isinstance(other, RSASignatureValidator):
             return False
 

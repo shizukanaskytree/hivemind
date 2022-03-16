@@ -5,6 +5,7 @@ import multiprocessing as mp
 import os
 from functools import partial
 from typing import Awaitable, Callable, Iterable, List, Optional, Sequence, TypeVar, Union
+import debugpy
 
 from multiaddr import Multiaddr
 
@@ -54,6 +55,7 @@ class DHT(mp.Process):
         await_ready: bool = True,
         **kwargs,
     ):
+        #debugpy.breakpoint()
         self._parent_pid = os.getpid()
         super().__init__()
 
@@ -87,6 +89,7 @@ class DHT(mp.Process):
 
     def run(self) -> None:
         """Serve DHT forever. This function will not return until DHT node is shut down"""
+        #debugpy.breakpoint()
 
         loop = switch_to_uvloop()
         pipe_semaphore = asyncio.Semaphore(value=0)
@@ -138,15 +141,18 @@ class DHT(mp.Process):
         Starts DHT in a background process. if await_ready, this method will wait until background dht
         is ready to process incoming requests or for :timeout: seconds max.
         """
+        #debugpy.breakpoint()
         self.start()
         if await_ready:
             self.wait_until_ready(timeout)
 
     def wait_until_ready(self, timeout: Optional[float] = None) -> None:
+        #debugpy.breakpoint()
         self._ready.result(timeout=timeout)
 
     def shutdown(self) -> None:
         """Shut down a running dht process"""
+        #debugpy.breakpoint()
         if self.is_alive():
             self._outer_pipe.send(("_shutdown", [], {}))
             self.join(self.shutdown_timeout)
@@ -155,6 +161,7 @@ class DHT(mp.Process):
                 self.terminate()
 
     async def _shutdown(self):
+        #debugpy.breakpoint()
         await self._node.shutdown()
 
     def get(
@@ -168,11 +175,13 @@ class DHT(mp.Process):
         :param kwargs: parameters forwarded to DHTNode.get_many_by_id
         :returns: (value, expiration time); if value was not found, returns None
         """
+        #debugpy.breakpoint()
         future = MPFuture()
         self._outer_pipe.send(("_get", [], dict(key=key, latest=latest, future=future, **kwargs)))
         return future if return_future else future.result()
 
     async def _get(self, key: DHTKey, latest: bool, future: MPFuture, **kwargs):
+        #debugpy.breakpoint()
         try:
             result = await self._node.get(key, latest=latest, **kwargs)
             if not future.done():
@@ -201,6 +210,7 @@ class DHT(mp.Process):
         :param return_future: if False (default), return when finished. Otherwise return MPFuture and run in background.
         :returns: True if store succeeds, False if it fails (due to no response or newer value)
         """
+        #debugpy.breakpoint()
         future = MPFuture()
         self._outer_pipe.send(
             (
@@ -220,6 +230,7 @@ class DHT(mp.Process):
         future: MPFuture,
         **kwargs,
     ):
+        #debugpy.breakpoint()
         try:
             result = await self._node.store(key, value, expiration_time, subkey=subkey, **kwargs)
             if not future.done():
@@ -245,6 +256,7 @@ class DHT(mp.Process):
           or use asyncio.get_event_loop().run_in_executor(...) to prevent coroutine from blocking background DHT tasks
         :note: when run_coroutine is called with wait=False, MPFuture can be cancelled to interrupt the task.
         """
+        #debugpy.breakpoint()
         future = MPFuture()
         self._outer_pipe.send(("_run_coroutine", [], dict(coro=coro, future=future)))
         return future if return_future else future.result()
@@ -252,6 +264,7 @@ class DHT(mp.Process):
     async def _run_coroutine(
         self, coro: Callable[[DHT, DHTNode], Awaitable[ReturnType]], future: MPFuture[ReturnType]
     ):
+        #debugpy.breakpoint()
         try:
             future.set_result(await coro(self, self._node))
         except BaseException as e:
@@ -259,6 +272,7 @@ class DHT(mp.Process):
             future.set_exception(e)
 
     def add_validators(self, record_validators: Iterable[RecordValidatorBase]) -> None:
+        #debugpy.breakpoint()
         if not self._ready.done():
             raise RuntimeError(
                 "Can't append new validators before the DHT process has started. "
@@ -269,26 +283,31 @@ class DHT(mp.Process):
 
     @staticmethod
     async def _add_validators(_dht: DHT, node: DHTNode, record_validators: Iterable[RecordValidatorBase]) -> None:
+        #debugpy.breakpoint()
         node.protocol.record_validator.extend(record_validators)
 
     @property
     def peer_id(self) -> PeerID:
+        #debugpy.breakpoint()
         if self._peer_id is None:
             self._peer_id = self.run_coroutine(DHT._get_peer_id)
         return self._peer_id
 
     @staticmethod
     async def _get_peer_id(_dht: DHT, node: DHTNode) -> PeerID:
+        #debugpy.breakpoint()
         return node.peer_id
 
     @property
     def client_mode(self) -> bool:
+        #debugpy.breakpoint()
         if self._client_mode is None:
             self._client_mode = self.run_coroutine(DHT._get_client_mode)
         return self._client_mode
 
     @staticmethod
     async def _get_client_mode(_dht: DHT, node: DHTNode) -> bool:
+        #debugpy.breakpoint()
         return node.protocol.client_mode
 
     def get_visible_maddrs(self, latest: bool = False) -> List[Multiaddr]:
@@ -298,10 +317,12 @@ class DHT(mp.Process):
         :param latest: ask the P2P daemon to refresh the visible multiaddrs
         """
 
+        #debugpy.breakpoint()
         return self.run_coroutine(partial(DHT._get_visible_maddrs, latest=latest))
 
     @staticmethod
     async def _get_visible_maddrs(_dht: DHT, node: DHTNode, latest: bool = False) -> List[Multiaddr]:
+        #debugpy.breakpoint()
         return await node.get_visible_maddrs(latest=latest)
 
     async def replicate_p2p(self) -> P2P:
@@ -309,6 +330,7 @@ class DHT(mp.Process):
         Get a replica of a P2P instance used in the DHT process internally.
         The replica uses the same P2P daemon as the DHT and only works while DHT is alive.
         """
+        #debugpy.breakpoint()
 
         if self._p2p_replica is None:
             daemon_listen_maddr = self.run_coroutine(DHT._get_p2p_daemon_listen_maddr)
@@ -317,8 +339,10 @@ class DHT(mp.Process):
 
     @staticmethod
     async def _get_p2p_daemon_listen_maddr(_dht: DHT, node: DHTNode) -> Multiaddr:
+        #debugpy.breakpoint()
         return node.p2p.daemon_listen_maddr
 
     def __del__(self):
+        #debugpy.breakpoint()
         if self._parent_pid == os.getpid() and self.is_alive():
             self.shutdown()

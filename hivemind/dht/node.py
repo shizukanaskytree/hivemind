@@ -22,6 +22,7 @@ from typing import (
     Type,
     Union,
 )
+import debugpy
 
 from multiaddr import Multiaddr
 from sortedcontainers import SortedSet
@@ -167,6 +168,8 @@ class DHTNode:
         :param kwargs: extra parameters for an internally created instance of hivemind.p2p.P2P.
           Should be empty if the P2P instance is provided in the constructor
         """
+        #debugpy.breakpoint()
+
         self = cls(_initialized_with_create=True)
         self.node_id = node_id if node_id is not None else DHTID.generate()
         self.num_replicas, self.num_workers, self.chunk_size = num_replicas, num_workers, chunk_size
@@ -265,11 +268,13 @@ class DHTNode:
 
     def __init__(self, *, _initialized_with_create=False):
         """Internal init method. Please use DHTNode.create coroutine to spawn new node instances"""
+        #debugpy.breakpoint()
         assert _initialized_with_create, " Please use DHTNode.create coroutine to spawn new node instances "
         super().__init__()
 
     async def shutdown(self):
         """Process existing requests, close all connections and stop the server"""
+        #debugpy.breakpoint()
         self.is_alive = False
         if self._should_shutdown_p2p:
             await self.p2p.shutdown()
@@ -294,6 +299,8 @@ class DHTNode:
         :param kwargs: additional params passed to traverse_dht
         :returns: for every query, return nearest peers ordered dict[peer DHTID -> network PeerID], nearest-first
         """
+        #debugpy.breakpoint()
+
         queries = tuple(queries)
         k_nearest = k_nearest if k_nearest is not None else self.protocol.bucket_size
         num_workers = num_workers if num_workers is not None else self.num_workers
@@ -344,6 +351,7 @@ class DHTNode:
         :note: store is a simplified interface to store_many, all kwargs are be forwarded there
         :returns: True if store succeeds, False if it fails (due to no response or newer value)
         """
+        #debugpy.breakpoint()
         store_ok = await self.store_many([key], [value], [expiration_time], subkeys=[subkey], **kwargs)
         return store_ok[(key, subkey) if subkey is not None else key]
 
@@ -371,6 +379,7 @@ class DHTNode:
             if True, the function will wait for num_replicas successful stores or running out of beam_size nodes
         :returns: for each key: True if store succeeds, False if it fails (due to no response or newer value)
         """
+        #debugpy.breakpoint()
         if isinstance(expiration_time, DHTExpiration):
             expiration_time = [expiration_time] * len(keys)
         if subkeys is None:
@@ -510,6 +519,8 @@ class DHTNode:
         store_ok: List[bool],
     ):
         """Update local cache after finishing a store for one key (with perhaps several subkeys)"""
+        #debugpy.breakpoint()
+
         store_succeeded = any(store_ok)
         is_dictionary = any(subkey is not None for subkey in subkeys)
         if store_succeeded and not is_dictionary:  # stored a new regular value, cache it!
@@ -538,6 +549,7 @@ class DHTNode:
         :param kwargs: parameters forwarded to get_many_by_id
         :returns: (value, expiration time); if value was not found, returns None
         """
+        #debugpy.breakpoint()
         if latest:
             kwargs["sufficient_expiration_time"] = float("inf")
         result = await self.get_many([key], **kwargs)
@@ -559,6 +571,7 @@ class DHTNode:
         :returns: for each key: value and its expiration time. If nothing is found, returns (None, None) for that key
         :note: in order to check if get returned a value, please check if (expiration_time is None)
         """
+        #debugpy.breakpoint()
         keys = tuple(keys)
         key_ids = [DHTID.generate(key) for key in keys]
         id_to_original_key = dict(zip(key_ids, keys))
@@ -592,6 +605,7 @@ class DHTNode:
         :returns: for each key: value and its expiration time. If nothing is found, returns (None, None) for that key
         :note: in order to check if get returned a value, please check (expiration_time is None)
         """
+        #debugpy.breakpoint()
         sufficient_expiration_time = sufficient_expiration_time or get_dht_time()
         beam_size = beam_size if beam_size is not None else self.protocol.bucket_size
         num_workers = num_workers if num_workers is not None else self.num_workers
@@ -677,6 +691,7 @@ class DHTNode:
                 raise e
 
     def _reuse_finished_search_result(self, finished: _SearchState):
+        #debugpy.breakpoint()
         pending_requests = self.pending_get_requests[finished.key_id]
         if finished.found_something:
             search_result = ValueWithExpiration(finished.binary_value, finished.expiration_time)
@@ -691,6 +706,7 @@ class DHTNode:
 
     async def _call_find_with_blacklist(self, peer_id: PeerID, keys: Collection[DHTID]):
         """same as call_find, but skip if :peer_id: is blacklisted; also exclude blacklisted neighbors from result"""
+        #debugpy.breakpoint()
         if peer_id in self.blacklist:
             return None
         response = await self.protocol.call_find(peer_id, keys)
@@ -705,16 +721,19 @@ class DHTNode:
             return None
 
     def _filter_blacklisted(self, peer_ids: Dict[DHTID, PeerID]):
+        #debugpy.breakpoint()
         return {peer: peer_id for peer, peer_id in peer_ids.items() if peer_id not in self.blacklist}
 
     def _trigger_cache_refresh(self, search: _SearchState):
         """Called after get request is finished (whether it was found, not found, hit cache, cancelled, or reused)"""
+        #debugpy.breakpoint()
         if search.found_something and search.source_node_id == self.node_id:
             if self.cache_refresh_before_expiry and search.key_id in self.protocol.cache:
                 self._schedule_for_refresh(search.key_id, search.expiration_time - self.cache_refresh_before_expiry)
 
     def _schedule_for_refresh(self, key_id: DHTID, refresh_time: DHTExpiration):
         """Add key to a refresh queue, refresh at :refresh_time: or later"""
+        #debugpy.breakpoint()
         if self.cache_refresh_task is None or self.cache_refresh_task.done() or self.cache_refresh_task.cancelled():
             self.cache_refresh_task = asyncio.create_task(self._refresh_stale_cache_entries())
             logger.debug("Spawned cache refresh task")
@@ -725,6 +744,7 @@ class DHTNode:
 
     async def _refresh_stale_cache_entries(self):
         """periodically refresh keys near-expired keys that were accessed at least once during previous lifetime"""
+        #debugpy.breakpoint()
         while self.is_alive:
             while len(self.cache_refresh_queue) == 0:
                 await self.cache_refresh_evt.wait()
@@ -767,6 +787,7 @@ class DHTNode:
         _is_refresh: bool = False,
     ):
         """after key_id is found, update cache according to caching policy. used internally in get and get_many"""
+        #debugpy.breakpoint()
         if search.found_something:
             _, storage_expiration_time = self.protocol.storage.get(search.key_id) or (None, -float("inf"))
             _, cache_expiration_time = self.protocol.cache.get(search.key_id) or (None, -float("inf"))
@@ -794,6 +815,7 @@ class DHTNode:
 
     async def _refresh_routing_table(self, *, period: Optional[float]) -> None:
         """Tries to find new nodes for buckets that were unused for more than self.staleness_timeout"""
+        #debugpy.breakpoint()
         while self.is_alive and period is not None:  # if None run once, otherwise run forever
             refresh_time = get_dht_time()
             staleness_threshold = refresh_time - period
@@ -807,6 +829,7 @@ class DHTNode:
             await asyncio.sleep(max(0.0, period - (get_dht_time() - refresh_time)))
 
     async def get_visible_maddrs(self, latest: bool = False) -> List[Multiaddr]:
+        #debugpy.breakpoint()
         return await self.protocol.p2p.get_visible_maddrs(latest=latest)
 
 
@@ -828,6 +851,7 @@ class _SearchState:
         candidate: Optional[ValueWithExpiration[Union[BinaryDHTValue, DictionaryDHTValue]]],
         source_node_id: Optional[DHTID],
     ):
+        #debugpy.breakpoint()
         if self.finished or candidate is None:
             return
         elif isinstance(candidate.value, DictionaryDHTValue) and isinstance(self.binary_value, DictionaryDHTValue):
@@ -845,9 +869,11 @@ class _SearchState:
 
     def add_done_callback(self, callback: Callable[[_SearchState], Any]):
         """Add callback that will be called when _SearchState is done (found OR cancelled by user)"""
+        #debugpy.breakpoint()
         self.future.add_done_callback(lambda _future: callback(self))
 
     def finish_search(self):
+        #debugpy.breakpoint()
         if self.future.done():
             return  # either user cancelled our search or someone sent it before us. Nothing more to do here.
         elif not self.found_something:
@@ -879,17 +905,21 @@ class _SearchState:
     @property
     def found_something(self) -> bool:
         """Whether or not we have found at least some value, regardless of its expiration time"""
+        #debugpy.breakpoint()
         return self.expiration_time is not None
 
     @property
     def finished(self) -> bool:
+        #debugpy.breakpoint()
         return self.future.done()
 
     def __lt__(self, other: _SearchState):
         """_SearchState instances will be sorted by their target expiration time"""
+        #debugpy.breakpoint()
         return self.sufficient_expiration_time < other.sufficient_expiration_time
 
     def __hash__(self):
+        #debugpy.breakpoint()
         return hash(self.key_id)
 
 
@@ -901,12 +931,14 @@ class Blacklist:
     """
 
     def __init__(self, base_time: float, backoff_rate: float, **kwargs):
+        #debugpy.breakpoint()
         self.base_time, self.backoff = base_time, backoff_rate
         self.banned_peers = TimedStorage[PeerID, int](**kwargs)
         self.ban_counter = Counter()
 
     def register_failure(self, peer: PeerID):
         """peer failed to respond, add him to blacklist or increase his downtime"""
+        #debugpy.breakpoint()
         if peer not in self.banned_peers and self.base_time > 0:
             ban_duration = self.base_time * self.backoff ** self.ban_counter[peer]
             self.banned_peers.store(peer, self.ban_counter[peer], expiration_time=get_dht_time() + ban_duration)
@@ -914,18 +946,22 @@ class Blacklist:
 
     def register_success(self, peer):
         """peer responded successfully, remove him from blacklist and reset his ban time"""
+        #debugpy.breakpoint()
         del self.banned_peers[peer], self.ban_counter[peer]
 
     def __contains__(self, peer: PeerID) -> bool:
+        #debugpy.breakpoint()
         return peer in self.banned_peers
 
     def __repr__(self):
+        #debugpy.breakpoint()
         return (
             f"{self.__class__.__name__}(base_time={self.base_time}, backoff={self.backoff}, "
             f"banned_peers={len(self.banned_peers)})"
         )
 
     def clear(self):
+        #debugpy.breakpoint()
         self.banned_peers.clear()
         self.ban_counter.clear()
 
