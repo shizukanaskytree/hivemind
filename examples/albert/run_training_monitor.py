@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+# debugpy.breakpoint()
+
 import time
 from dataclasses import asdict, dataclass, field
 from ipaddress import ip_address
