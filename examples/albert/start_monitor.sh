@@ -1,0 +1,1 @@
+WANDB_DISABLED=true python run_training_monitor.py --wandb_project Demo-run
