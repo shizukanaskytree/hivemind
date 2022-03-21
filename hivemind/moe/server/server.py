@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+# debugpy.breakpoint()
+
 import multiprocessing as mp
 import random
 import threading

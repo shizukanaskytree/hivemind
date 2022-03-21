@@ -73,7 +73,7 @@ class ProgressTrackerArguments:
 @dataclass
 class OptimizerArguments:
     target_batch_size: int = field(
-        default=32, # fast and easy for debug
+        default=32, # fast and easy for debug, original is 4096
         metadata={"help": "Perform optimizer step after all peers collectively accumulate this many samples"},
     )
     client_mode: bool = field(
