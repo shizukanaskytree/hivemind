@@ -88,3 +88,5 @@ examples/albert/wandb
 examples/albert/logs
 examples/albert/data
 examples/albert/outputs
+
+examples/model_partitioning/wandb

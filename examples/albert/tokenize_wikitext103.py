@@ -9,7 +9,12 @@ from transformers import AlbertTokenizerFast
 
 COLUMN_NAMES = ("attention_mask", "input_ids", "sentence_order_label", "special_tokens_mask", "token_type_ids")
 
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
+# debugpy.breakpoint()
 
+# 从这个的处理来看, 这个是在做 next sentence task, 不是 masked language task.
 def create_instances_from_document(tokenizer, document, max_seq_length):
     """
     Creates training instances from a single document.

@@ -202,6 +202,7 @@ class Server(threading.Thread):
         experts = {}
         for expert_uid in expert_uids:
             expert = name_to_block[expert_cls](hidden_dim)
+            # ps 也可以写一个类似的 PSExpertBackend 内部包含模型, 相应的其他组件.
             experts[expert_uid] = ExpertBackend(
                 name=expert_uid,
                 expert=expert,

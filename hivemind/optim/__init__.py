@@ -5,3 +5,5 @@ from hivemind.optim.grad_scaler import GradScaler, HivemindGradScaler
 from hivemind.optim.optimizer import Optimizer
 from hivemind.optim.simple import DecentralizedAdam, DecentralizedOptimizer, DecentralizedSGD
 from hivemind.optim.training_averager import TrainingAverager
+from hivemind.optim.ps_optim import ParamServer
+from hivemind.optim.worker_optim import WorkerOptimizer

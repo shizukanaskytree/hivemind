@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-If I change the model, does it affect this monitor? => Yes!
-"""
 
 import time
 from dataclasses import asdict, dataclass, field
@@ -12,13 +9,12 @@ import requests
 import torch
 import wandb
 from torch_optimizer import Lamb
-
 from transformers import AlbertConfig, AlbertForPreTraining, HfArgumentParser, get_linear_schedule_with_warmup
 
-from transformers import BertForMaskedLM
-
 import hivemind
-from hivemind.optim.state_averager import TrainingStateAverager
+# from hivemind.optim.state_averager import TrainingStateAverager
+from hivemind.optim.ps_optim import ParamServer
+
 from hivemind.utils.logging import get_logger, use_hivemind_log_handler
 
 import utils
@@ -47,12 +43,9 @@ class TrainingMonitorArguments(BaseTrainingArguments):
         default=None, metadata={"help": "Name of Weights & Biases project to report the training progress to"}
     )
     store_checkpoints: bool = field(default=True, metadata={"help": "If False, disables periodic checkpoint saving"})
-
-    # 这个参数的效果是每隔 5 步 saving state from peers: https://gist.github.com/shizukanaskytree/6763c931cd2442b5dabfc6a4eb90f096
     save_checkpoint_step_interval: int = field(
-        default=1, metadata={"help": "Frequency (in steps) of fetching and saving state from peers"}
+        default=5, metadata={"help": "Frequency (in steps) of fetching and saving state from peers"}
     )
-
     model_config_path: str = field(
         default="https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v2-config.json",
         metadata={"help": "Path to the model config"},
@@ -82,10 +75,8 @@ class CheckpointHandler:
         self.upload_interval = monitor_args.upload_interval
         self.previous_step = -1
 
-        # config = AlbertConfig.from_pretrained(monitor_args.model_config_path)
-        # self.model = AlbertForPreTraining(config)
-
-        self.model = BertForMaskedLM.from_pretrained('bert-base-uncased')
+        config = AlbertConfig.from_pretrained(monitor_args.model_config_path)
+        self.model = AlbertForPreTraining(config)
 
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
@@ -107,12 +98,12 @@ class CheckpointHandler:
             debias=True,
         )
 
-        # wxf: why used here for a monitor?
-        self.state_averager = TrainingStateAverager(
+        # use this to host parameter server in the background.
+        self.state_averager = ParamServer(
             dht=dht,
             optimizer=opt,
             scheduler=get_linear_schedule_with_warmup(opt, num_warmup_steps=5000, num_training_steps=125_000),
-            prefix=f"{run_id}_state_averager",
+            prefix= "ps" # f"{run_id}_state_averager", # ps_state_averager
             state_compression=hivemind.Float16Compression(),
             bandwidth=optimizer_args.bandwidth,
             client_mode=optimizer_args.client_mode,
@@ -144,10 +135,7 @@ class CheckpointHandler:
 
     def upload_checkpoint(self, current_loss):
         logger.info("Saving optimizer")
-
         torch.save(self.state_averager.optimizer.state_dict(), f"{self.repo_path}/optimizer_state.pt")
-        # torch save optimizer state
-
         self.previous_timestamp = time.time()
         logger.info("Started uploading to Model Hub")
         self.model.push_to_hub(
@@ -171,7 +159,11 @@ if __name__ == "__main__":
         version = ip_address(address).version
         monitor_args.announce_maddrs += [f"/ip{version}/{address}/tcp/0"]
 
-    run_id = monitor_args.run_id
+    #######################################################################
+    # run_id
+    #
+    run_id = "ps" # + monitor_args.run_id # parameter server id
+
     validators, local_public_key = utils.make_validators(run_id)
 
     dht = hivemind.DHT(
@@ -193,50 +185,49 @@ if __name__ == "__main__":
         checkpoint_handler = CheckpointHandler(monitor_args, optimizer_args, averager_args, dht)
 
     while True:
-        metrics_dict = dht.get(run_id + "_metrics", latest=True)
-        if metrics_dict is not None:
-            metrics_dict = metrics_dict.value
-            metrics = [utils.LocalMetrics.parse_obj(metrics_dict[peer].value) for peer in metrics_dict]
-            latest_step = max(item.step for item in metrics)
+        # metrics_dict = dht.get(run_id + "_metrics", latest=True) # 因为我改了 run_id, 所以这个分支目前来看什么都取不到.
+        # if metrics_dict is not None:
+        #     metrics_dict = metrics_dict.value
+        #     metrics = [utils.LocalMetrics.parse_obj(metrics_dict[peer].value) for peer in metrics_dict]
+        #     latest_step = max(item.step for item in metrics)
 
-            if latest_step != current_step:
-                logger.debug(f"Got metrics from {len(metrics)} peers")
+        #     if latest_step != current_step:
+        #         logger.debug(f"Got metrics from {len(metrics)} peers")
 
-                for i, metrics_for_peer in enumerate(metrics):
-                    logger.debug(f"{i} peer {metrics_for_peer}")
+        #         for i, metrics_for_peer in enumerate(metrics):
+        #             logger.debug(f"{i} peer {metrics_for_peer}")
 
-                current_step = latest_step
-                alive_peers = 0
-                sum_loss = 0
-                num_samples = 0
-                sum_perf = 0
-                sum_mini_steps = 0
+        #         current_step = latest_step
+        #         alive_peers = 0
+        #         sum_loss = 0
+        #         num_samples = 0
+        #         sum_perf = 0
+        #         sum_mini_steps = 0
 
-                for item in metrics:
-                    sum_loss += item.loss
-                    alive_peers += 1
-                    sum_perf += item.samples_per_second
-                    num_samples += item.samples_accumulated
-                    sum_mini_steps += item.mini_steps
-                current_loss = sum_loss / sum_mini_steps
-                logger.info(f"Step #{current_step}\tloss = {current_loss:.5f}")
+        #         for item in metrics:
+        #             sum_loss += item.loss
+        #             alive_peers += 1
+        #             sum_perf += item.samples_per_second
+        #             num_samples += item.samples_accumulated
+        #             sum_mini_steps += item.mini_steps
+        #         current_loss = sum_loss / sum_mini_steps
+        #         logger.info(f"Step #{current_step}\tloss = {current_loss:.5f}")
 
-                if monitor_args.wandb_project is not None:
-                    wandb.log(
-                        {
-                            "loss": current_loss,
-                            "alive peers": alive_peers,
-                            "samples": num_samples,
-                            "performance": sum_perf,
-                            "step": latest_step,
-                        }
-                    )
+        #         if monitor_args.wandb_project is not None:
+        #             wandb.log(
+        #                 {
+        #                     "loss": current_loss,
+        #                     "alive peers": alive_peers,
+        #                     "samples": num_samples,
+        #                     "performance": sum_perf,
+        #                     "step": latest_step,
+        #                 }
+        #             )
 
-                if monitor_args.store_checkpoints:
-                    logger.info("store checkpoint")
-                    if checkpoint_handler.is_time_to_save_state(current_step):
-                        checkpoint_handler.save_state(current_step)
-                        if checkpoint_handler.is_time_to_upload():
-                            checkpoint_handler.upload_checkpoint(current_loss)
+        #         if monitor_args.store_checkpoints:
+        #             if checkpoint_handler.is_time_to_save_state(current_step):
+        #                 checkpoint_handler.save_state(current_step)
+        #                 if checkpoint_handler.is_time_to_upload():
+        #                     checkpoint_handler.upload_checkpoint(current_loss)
         logger.debug("Peer is still alive...")
         time.sleep(monitor_args.refresh_period)

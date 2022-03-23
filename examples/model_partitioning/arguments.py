@@ -6,9 +6,10 @@ from transformers import TrainingArguments
 
 @dataclass
 class BaseTrainingArguments:
-    run_id: str = field(
-        default="bert", metadata={"help": "A unique 'name' of this experiment, used to store metadata on the DHT"}
-    )
+    # 这个参数不能用了.
+    # run_id: str = field(
+    #     default="bert", metadata={"help": "A unique 'name' of this experiment, used to store metadata on the DHT"}
+    # )
     initial_peers: List[str] = field(
         default_factory=list,
         metadata={

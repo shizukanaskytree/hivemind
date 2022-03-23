@@ -16,6 +16,10 @@ class GradientAverager(DecentralizedAverager):
     An auxiliary averaging class that is responsible for accumulating gradients and aggregating them with peers.
     GradientAverager is meant to be used within hivemind.Optimizer, but it can be used standalone (see example below).
 
+    wxf: 这个很重要的组件, 我需要用.
+    我再说两句: GradientAverager is used to accumulate gradients and aggregating them with peers.
+
+
     GradientAverager manages three sets of buffers:
     (1) model gradients - the gradients associated with local model parameters by PyTorch (param.grad).
         These tensors are typically stored on device and updated by torch autograd
@@ -62,6 +66,18 @@ class GradientAverager(DecentralizedAverager):
     >>>        grad_averager.reset_accumulated_grads_()  # prepare for next step
     >>>        next_step_time = hivemind.get_dht_time() + 60
     >>>        next_step_control = None
+
+    中规中矩符合预期的代码.
+
+    定义:
+        模型
+        单机的优化 optimizer
+        GradientAverager
+
+
+    法
+    这个是怎么做到的呢?
+
 
     """
 
@@ -115,28 +131,43 @@ class GradientAverager(DecentralizedAverager):
 
     @torch.no_grad()
     def accumulate_grads_(self, batch_size: int):
-        """add current gradients to local grad accumulators (if used)"""
+        """add current gradients to local grad accumulators (if used)
+
+        如果有 local grad accumulators 那么 remote 的在哪里呢?
+        这些是如何帮助其目的达到轮一遍算平均的呢?
+
+        """
         if self._accumulators_used_in_step and self.warn:
             logger.warning(
                 "[warn=True] Gradient accumulators were not reset since the last averaging round. Please "
                 "call .reset_accumulated_grads_ after every step or use .step(reset_accumulators=True)"
             )
             self._accumulators_used_in_step = False  # warn once per round
+
         if self._anchor_batch_size is None:
             # remember the first batch size to correctly re-scale gradients if subsequent batches have a different size
             self._anchor_batch_size = batch_size
+
         self.local_samples_accumulated += batch_size
+
         self.local_times_accumulated += 1
+
         if self.reuse_grad_buffers:
             pass  # user is responsible for accumulating gradients in .grad buffers
         else:
             alpha = float(batch_size) / self._anchor_batch_size
+            # wxf: 把 grad 攒如 **local** grad accumulator 内, 这样就是 accumulate grads.
             for grad_buf, grad_acc in zip(self._grads_from_parameters(), self._grad_accumulators()):
                 grad_acc.add_(grad_buf.to(grad_acc.device), alpha=alpha)
+
 
     def schedule_step(self, scheduled_time: Optional[DHTExpiration] = None, **kwargs) -> StepControl:
         """
         Begin matchmaking: look for a group of peers and prepare for averaging gradients at a specified time.
+
+        wxf:
+        push pull 和这个有相同相似之处吗?
+
 
         :param scheduled_time: expected time when to perform all-reduce. Can be changed using control.scheduled_time
         :param kwargs: any additional keyword args from DecentralizedAverager.step, such as gather, allow_retries, etc
@@ -158,6 +189,14 @@ class GradientAverager(DecentralizedAverager):
     ):
         """
         Average accumulated gradients with peers, optionally load averaged gradients and reset accumulators
+
+        wxf:
+
+        difference:
+        不是广撒网后捞出一把 peers 然后做平均,
+        目前的需求是
+        1. accumulate gradients from an individual peer.
+        2. average 4096 peers' gradients.
 
         :param weight: overrides the averaging weight; by default, weight equals the number of accumulated samples
         :param reset_accumulators: by default, set local gradient accumulators to zeros after averaging succeeds

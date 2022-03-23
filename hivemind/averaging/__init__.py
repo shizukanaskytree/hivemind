@@ -1,1 +1,2 @@
 from hivemind.averaging.averager import DecentralizedAverager
+from hivemind.averaging.param_server import ParameterServerBase

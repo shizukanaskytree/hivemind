@@ -52,11 +52,17 @@ from hivemind.utils.timed_storage import DHTExpiration, ValueWithExpiration, get
 GatheredData = Any
 logger = get_logger(__name__)
 
+# wxf: averaging -> optim folder.
 
 class DecentralizedAverager(mp.Process, ServicerBase):
     """
     Parameter averaging service. A trainer can run this service in background to periodically average his parameters
-    with other trainers. The averaging pattern is chosen so that (1) you only need to average with a small
+    with other trainers.
+
+    wxf: parameter has this ability 就可以了.
+
+
+    The averaging pattern is chosen so that (1) you only need to average with a small
     group of peers at a time, but (2) all trainers will converge to global average in a logarithmic number of steps.
 
     :param averaged_tensors: a sequence of pytorch tensors that will be averaged in each all-reduce
@@ -64,7 +70,12 @@ class DecentralizedAverager(mp.Process, ServicerBase):
     :param start: if True, starts the background process immediately
 
     :param prefix: a shared prefix for all group keys
+
+
     :param target_group_size: attempts to form groups with up to this many peers (recommended: a power of 2, e.g. 16)
+    wxf: I can say set this to 2, 1 is for parameter server and another one is for any ready trainer.
+
+
     :param initial_group_bits: a string of bits ('0' and '1') that define the initial group key (bucket index)
     :param min_matchmaking_time: when looking for group, wait for requests for at least this many seconds
     :param compression: optionally compress tensors with this compression algorithm before running all-reduce
@@ -78,9 +89,13 @@ class DecentralizedAverager(mp.Process, ServicerBase):
     :param bandwidth: if specified, this value represents the network bandwidth available to averager.
           By default, the averager is assumed to have the average bandwidth of his group.
           If bandwidth == 0, averager will rely on its groupmates to do all the averaging.
+
+    wxf: 这个是是怎么运作的?
     :param client_mode: if False, this averager will accept incoming requests from other peers.
           if True, the averager will only join existing groups where at least one peer has client_mode=False.
           By default, this flag is copied from DHTNode inside the ``dht`` instance.
+
+
     :param auxiliary: if this flag is specified, averager.step will only assist others without sending
           local tensors for averaging
     :param allow_state_sharing: if set to True, other peers can download this peer's state. Can be overwritten
@@ -298,6 +313,7 @@ class DecentralizedAverager(mp.Process, ServicerBase):
                 else:
                     logger.debug("The averager is running in client mode")
 
+                # match making 只会找相同 prefix 的 dht node.
                 self._matchmaking = Matchmaking(
                     self._p2p,
                     self.schema_hash,
@@ -305,8 +321,14 @@ class DecentralizedAverager(mp.Process, ServicerBase):
                     client_mode=self.client_mode,
                     **self.matchmaking_kwargs,
                 )
+
+                # client mode does not share.
                 if not self.client_mode:
-                    asyncio.create_task(self._declare_for_download_periodically())
+                    # 因为现在我们不需要 all reduce 的这个功能, 所以只需要设定 ps 这个下载功能就可以了, 把这个类当成 parameter server 用.
+                    # asyncio.create_task(self._declare_for_download_periodically())
+                    # 这里定义了 ps download_key
+                    # 暂时一个 optimizer 两个用途吧.
+                    asyncio.create_task(self._declare_for_download_ps_periodically())
 
                 self._state_updated = asyncio.Event()
                 self._pending_group_assembled = asyncio.Event()
@@ -385,18 +407,29 @@ class DecentralizedAverager(mp.Process, ServicerBase):
         """
         Set up the averager to look for a group and run one round of averaging, return True on success, False on failure
 
+        wxf: how to use this function to send tensors?
+
+
         :param gather: optionally send this informaton to all peers in the next group and gather it from every groupmate
           (this operation is known as all-gather). The gathered data will be available as the output of this function.
+
         :param scheduled_time: when matchmaking, assume that all-reduce will begin at this moment.
           By default, schedule all-reduce current time plus min_matchmaking_time seconds
+
         :param weight: averaging weight for this peer, int or float, must be strictly positive
+
         :param allow_retries: if averager fails to run one round of allreduce, this option will allow it to try again
           within the specified timeout
+
         :param require_trigger: if True, await for user to call .allow_allreduce() before running all-reduce
+
         :param timeout: if averager was unable to *find* a group in this many seconds, consider allreduce failed
+
         :param wait: if True (default), return when finished. Otherwise return StepControl and run in background.
+
         :returns: on success, update averaged_tensors and return group info; on failure, return None
         """
+
         if self.mode == AveragingMode.AUX and weight is not None:
             logger.warning("Averager is running in auxiliary mode, weight is unused")
         if scheduled_time is None:
@@ -504,7 +537,11 @@ class DecentralizedAverager(mp.Process, ServicerBase):
                 )
 
     async def _run_allreduce(self, group_info: GroupInfo, min_vector_size: int, **kwargs) -> GatheredData:
-        """Run All-Reduce in a given group and update tensors in place, return gathered metadata"""
+        """Run All-Reduce in a given group and update tensors in place, return gathered metadata
+
+        in place: not traveling any distance. 原地.
+
+        """
         try:
             bandwidths, mode_ids, user_gathered_bytes = zip(*map(self.serializer.loads, group_info.gathered))
             user_gathered = dict(zip(group_info.peer_ids, map(self.serializer.loads, user_gathered_bytes)))
@@ -531,6 +568,9 @@ class DecentralizedAverager(mp.Process, ServicerBase):
                     modes=modes,
                     **kwargs,
                 )
+                # 当我用 2 个 trainer 实验的时候:
+                # group_id https://gist.github.com/shizukanaskytree/4b6f596d17a86e01bf444020456e3c35
+                #
 
                 with self.register_allreduce_group(group_info.group_id, allreduce):
                     if modes[group_info.peer_ids.index(self.peer_id)] != AveragingMode.AUX:
@@ -581,7 +621,9 @@ class DecentralizedAverager(mp.Process, ServicerBase):
     async def rpc_aggregate_part(
         self, stream: AsyncIterator[averaging_pb2.AveragingData], context: P2PContext
     ) -> AsyncIterator[averaging_pb2.AveragingData]:
-        """a groupmate sends us a part of his tensor; we should average it with other peers and return the result"""
+        """a groupmate sends us a part of his tensor; we should average it with other peers and return the result
+
+        """
         request = await anext(stream)
         if request.group_id not in self._running_groups:
             # this handles a special case when leader accepted us to group AND began allreduce right away,
@@ -624,30 +666,76 @@ class DecentralizedAverager(mp.Process, ServicerBase):
             except asyncio.TimeoutError:
                 pass
 
+    async def _declare_for_download_ps_periodically(self):
+        # 参考: def _declare_for_download_periodically
+        # this is only be used for ps
+
+        # download_key = f"{self._matchmaking.group_key_manager.prefix}.ps"
+        download_key = "ps"
+
+        # 只有通过 key 才能得到 peer 的感觉
+        # 这个函数只对 PS optimizer 有效, 这里借用一下 DecentralizedAverager 其他的组件.
+
+        sharing_was_allowed = self.allow_state_sharing
+
+        while True:
+            expiration_time = get_dht_time() + self.declare_state_period
+            if self.allow_state_sharing or sharing_was_allowed:
+                # notify either if sharing is allowed or if it was just switched off (to overwrite previous message)
+                asyncio.create_task(
+                    asyncio.wait_for(
+                        self.dht.store(
+                            download_key,
+                            subkey=self.peer_id.to_bytes(),
+                            value=self.state_sharing_priority if self.allow_state_sharing else None,
+                            expiration_time=expiration_time,
+                            return_future=True,
+                        ),
+                        timeout=expiration_time - get_dht_time(),
+                    )
+                )
+                sharing_was_allowed = self.allow_state_sharing
+
+            # report again either in state_declare_period or after the field was changed by the user
+            self._state_updated.clear()
+            try:
+                await asyncio.wait_for(self._state_updated.wait(), timeout=max(0.0, expiration_time - get_dht_time()))
+            except asyncio.TimeoutError:
+                pass
+
+
+
     async def rpc_download_state(
-        self, _request: averaging_pb2.DownloadRequest, _context: P2PContext
-    ) -> AsyncIterator[averaging_pb2.DownloadData]:
-        """
-        Get the up-to-date trainer state from a peer.
-        The state consists of two parts: (serialized_metadata, tensors)
+            self, _request: averaging_pb2.DownloadRequest, _context: P2PContext
+        ) -> AsyncIterator[averaging_pb2.DownloadData]:
+            """
+            Get the up-to-date trainer state from a peer.
+            The state consists of two parts: (serialized_metadata, tensors)
 
-         - serialized_metadata is a small serialized bytestring meant to store scalars and hyperparameters
-         - tensors is a sequence of pytorch tensors that represent model parameters or optimizer statistics
-        """
-        if not self.allow_state_sharing:
-            return  # deny request and direct peer to the next prospective averager
-        metadata, tensors, infos = await self._get_current_state_from_host_process()
-        if infos is None:
-            infos = [CompressionInfo.from_tensor(tensor, key=i) for i, tensor in enumerate(tensors)]
-        assert len(tensors) == len(infos)
+            - serialized_metadata is a small serialized bytestring meant to store scalars and hyperparameters
+            - tensors is a sequence of pytorch tensors that represent model parameters or optimizer statistics
 
-        for tensor, info in zip(tensors, infos):
-            for part in split_for_streaming(self.state_compression.compress(tensor, info, allow_inplace=False)):
-                if metadata is not None:
-                    yield averaging_pb2.DownloadData(tensor_part=part, metadata=metadata)
-                    metadata = None
-                else:
-                    yield averaging_pb2.DownloadData(tensor_part=part)
+            server side rpc call.
+            """
+            logger.info('calling rpc_download_state')
+            if not self.allow_state_sharing:
+                return  # deny request and direct peer to the next prospective averager
+            metadata, tensors, infos = await self._get_current_state_from_host_process()
+            if infos is None:
+                infos = [CompressionInfo.from_tensor(tensor, key=i) for i, tensor in enumerate(tensors)]
+            assert len(tensors) == len(infos)
+
+            for tensor, info in zip(tensors, infos):
+                for part in split_for_streaming(self.state_compression.compress(tensor, info, allow_inplace=False)):
+                    if metadata is not None:
+                        yield averaging_pb2.DownloadData(tensor_part=part, metadata=metadata)
+                        metadata = None
+                        logger.info('for loop iterating part in rpc_download_state: part + metadata')
+                    else:
+                        logger.info('for loop iterating part in rpc_download_state: part')
+                        yield averaging_pb2.DownloadData(tensor_part=part)
+            logger.info('called rpc_download_state')
+
 
     def get_current_state(self) -> Tuple[Any, Sequence[torch.Tensor], Sequence[CompressionInfo]]:
         """
@@ -663,6 +751,84 @@ class DecentralizedAverager(mp.Process, ServicerBase):
         future = MPFuture()
         self._inner_pipe.send(("_TRIGGER_GET_CURRENT_STATE", future))
         return await future
+
+    # wxf: 
+    # pull
+    def load_state_from_ps(
+        self, wait: bool = True, timeout: Optional[float] = None
+    ) -> Optional[Tuple[Any, Sequence[torch.Tensor]]]:
+        """
+        Try to download the latest optimizer state one of the existing peer.
+        :returns: on success, return a 2-tuple with (metadata, tensors), where
+
+        - metadata is a small object containing metadata (e.g. hyperparameters, scalars, etc)
+        - tensors is a sequence of pytorch tensors meant to contain peer's model weights and optimizer statistics
+
+        The exact contents of both metadata and tensors are determined by get_current_state method
+        """
+        future = MPFuture()
+        self._outer_pipe.send(("_load_state_from_ps", [], dict(timeout=timeout, future=future)))
+        return future.result(timeout=timeout) if wait else future
+
+
+    async def _load_state_from_ps(self, future: MPFuture, timeout: Optional[float] = None):
+        if timeout is not None:
+            timeout = self.next_chunk_timeout if self.next_chunk_timeout is not None else self.request_timeout
+        try:
+            # key_manager = self._matchmaking.group_key_manager
+            # peer_priority, _ = self.dht.get(f"{key_manager.prefix}.ps", latest=True) or ({}, None)
+
+            # load state from dht with key "ps".
+            # where is the dht with key "ps"?
+            peer_priority, _ = self.dht.get("ps", latest=True) or ({}, None)
+
+            peer_priority = {
+                PeerID(peer_id): (float(info.value), random.random())  # using randomness as a tie breaker
+                for peer_id, info in peer_priority.items()
+                if isinstance(info, ValueWithExpiration) and isinstance(info.value, (float, int))
+            }
+
+            if not isinstance(peer_priority, dict) or len(peer_priority) == 0:
+                logger.info(f"Averager could not load state from peers: peer dict empty or corrupted {peer_priority}")
+                future.set_result(None)
+                return
+
+            metadata = None
+            for peer in sorted(peer_priority.keys(), key=peer_priority.get, reverse=True):
+                if peer != self.peer_id: # del this if in the future
+                    logger.info(f"Downloading parameters from peer {peer}")
+                    try:
+                        # 按道理应该会找到那个 peer.
+                        stub = self.get_stub(self._p2p, peer, namespace=self.prefix)
+                        # 这个 stub 调用 rpc_download_state
+                        stream = await stub.rpc_download_state(averaging_pb2.DownloadRequest())
+                        current_tensor_parts, tensors = [], []
+
+                        async for message in aiter_with_timeout(stream, timeout=timeout):
+                            if message.metadata:
+                                metadata = self.serializer.loads(message.metadata)
+                            if message.tensor_part.dtype and current_tensor_parts:
+                                # tensor_part.dtype indicates the start of the new tensor, so we should wrap up this one
+                                tensors.append(deserialize_torch_tensor(combine_from_streaming(current_tensor_parts)))
+                                current_tensor_parts = []
+                            current_tensor_parts.append(message.tensor_part)
+                        if current_tensor_parts:
+                            tensors.append(deserialize_torch_tensor(combine_from_streaming(current_tensor_parts)))
+
+                        if not metadata:
+                            logger.debug(f"Peer {peer} did not send its state")
+                            continue
+
+                        logger.info(f"Finished downloading state from {peer}")
+                        future.set_result((metadata, tensors))
+                        return
+                    except Exception as e:
+                        logger.exception(f"Failed to download state from {peer} - {repr(e)}")
+
+        finally:
+            if not future.done():
+                future.set_result(None)
+
 
     def load_state_from_peers(
         self, wait: bool = True, timeout: Optional[float] = None

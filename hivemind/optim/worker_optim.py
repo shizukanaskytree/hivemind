@@ -24,30 +24,21 @@ from hivemind.optim.state_averager import (
     TrainingStateAverager,
 )
 from hivemind.utils import PerformanceEMA, get_dht_time, get_logger
+from hivemind.optim.ps_optim import ParamServer
+# 需要用到 ParamServer 类里面的 load state from ps, i.e. ParamServerBase.load_state_from_ps
 
 logger = get_logger(__name__)
 
 
-class Optimizer(torch.optim.Optimizer):
+class WorkerOptimizer(torch.optim.Optimizer):
     """
-    Optimizer 是用来调节 weights 的控制算法.
-    wxf: 需要让它做到 parameter server 的角色
-
-
     hivemind.Optimizer wraps your regular PyTorch Optimizer for training collaboratively with peers.
 
     By default, Optimizer is configured to be exactly **equivalent to synchronous training** with target_batch_size.
-
     There are advanced options make training semi-asynchronous (delay_optimizer_step and delay_gradient_averaging)
     or even fully asynchronous (use_local_updates=True).
 
-    use_local_updates: https://gist.github.com/shizukanaskytree/98326206d2651a7b7060cfff254f23bd
-
     :example: The Optimizer can be used as a drop-in replacement for a regular PyTorch Optimizer:
-
-
-    这个写得很清楚:
-
 
     >>> model = transformers.AutoModel("albert-xxlarge-v2")
     >>> dht = hivemind.DHT(initial_peers=INITIAL_PEERS, start=True)
@@ -58,8 +49,6 @@ class Optimizer(torch.optim.Optimizer):
     >>>     opt.zero_grad()
     >>>     loss.backward()
     >>>     opt.step()  # <-- train collaboratively with any peers that use the same prefix (run_42)
-
-
 
     By default, peers will perform the following steps:
 
@@ -152,13 +141,9 @@ class Optimizer(torch.optim.Optimizer):
       hardly ever skip averaging rounds, they can average state less frequently. In turn, network failures, lossy
       gradient compression and local_updates cause parameters to diverge faster and requires more frequent averaging.
 
-
-    wxf:
     :param use_local_updates: if enabled, peers will update parameters on each .step using local gradients;
       if not enabled (default), accumulate gradients to target_batch_size, and then call .step with averaged gradients.
       Even if use_local_updates=True, learning rate scheduler will still be called once per target_batch_size.
-
-
 
     :param client_mode: if True, this peer will not accept incoming connections (firewall-compatible mode)
     :param auxiliary: if True, optimizer.step will only assist other peers in averaging (for cpu-only workers)
@@ -187,9 +172,7 @@ class Optimizer(torch.optim.Optimizer):
         target_batch_size: int,
         batch_size_per_step: Optional[int] = None,
         optimizer: Union[TorchOptimizer, OptimizerFactory],
-
-        params: Optional[Union[Parameters, ParamGroups]] = None, # 有了它, 传到 param server 不就好了吗?
-
+        params: Optional[Union[Parameters, ParamGroups]] = None,
         scheduler: Optional[Union[LRSchedulerBase, SchedulerFactory]] = None,
         matchmaking_time: Optional[float] = 15.0,
         averaging_timeout: Optional[float] = 60.0,
@@ -262,8 +245,6 @@ class Optimizer(torch.optim.Optimizer):
         self.tracker = self._make_progress_tracker(
             target_batch_size, performance_ema_alpha=performance_ema_alpha, **tracker_opts or {}
         )
-
-        # wxf: allreduce 可以设置 leader 吗? 可以一步传一次 grad 吗?
         self.state_averager = self._make_state_averager(
             optimizer=optimizer,
             params=params,
@@ -294,8 +275,26 @@ class Optimizer(torch.optim.Optimizer):
         # note: the line above is used by pytorch AMP GradScaler to enable custom behavior needed when reusing gradient
         # buffers over multiple steps (to avoid repeated unscaling). Without reuse_grad_buffers, this is not needed.
 
-    def _make_state_averager(self, **kwargs) -> TrainingStateAverager:
-        return TrainingStateAverager(
+    # def _make_state_averager(self, **kwargs) -> TrainingStateAverager:
+    #     return TrainingStateAverager(
+    #         dht=self.dht,
+    #         prefix=f"{self.run_id}_state_averager",
+    #         min_matchmaking_time=self.matchmaking_time,
+    #         allreduce_timeout=self.allreduce_timeout,
+    #         shutdown_timeout=self.shutdown_timeout,
+    #         offload_optimizer=self.offload_optimizer,
+    #         custom_gradients=self.offload_optimizer,
+    #         status_loglevel=self.status_loglevel,
+    #         next_chunk_timeout=self.next_chunk_timeout,
+    #         client_mode=self.client_mode,
+    #         auxiliary=self.auxiliary,
+    #         start=True,
+    #         **kwargs,
+    #     )
+
+    # worker -> call stub and push to, pull from PS.
+    def _make_ps_state(self, **kwargs) -> ParamServer:
+        return ParamServer(
             dht=self.dht,
             prefix=f"{self.run_id}_state_averager",
             min_matchmaking_time=self.matchmaking_time,
@@ -313,6 +312,7 @@ class Optimizer(torch.optim.Optimizer):
 
     def _make_gradient_averager(self, **kwargs) -> GradientAverager:
         assert hasattr(self, "state_averager"), "must initialize state averager first"
+
         grad_averager = GradientAverager(
             dht=self.dht,
             prefix=f"{self.run_id}_grad_averager",
@@ -623,10 +623,7 @@ class Optimizer(torch.optim.Optimizer):
             self._load_local_gradients_into_optimizer()
 
     def _load_averaged_gradients_into_optimizer_(self):
-        """If required, load averaged gradients into optimizer; otherwise simply notify grad averager
-
-        这个即使实现了 parameter server 也是需要的.
-        """
+        """If required, load averaged gradients into optimizer; otherwise simply notify grad averager"""
         assert self.use_gradient_averaging
 
         if self.offload_optimizer:
@@ -652,12 +649,7 @@ class Optimizer(torch.optim.Optimizer):
         self._load_averaged_gradients_into_optimizer_()
 
     def zero_grad(self, set_to_none: bool = False):
-        """Reset gradients from model. If reuse_grad_buffers=True, this will raise an error.
-
-        wxf: Common in original API. SEE: https://www.notion.so/xiaofengwu/optimizer-c62d04bd2f134d84bc7f20b4578e1987
-
-        """
-
+        """Reset gradients from model. If reuse_grad_buffers=True, this will raise an error."""
         if self.use_gradient_averaging and self.grad_averager.reuse_grad_buffers:
             raise ValueError(
                 f"When running {self.__class__.__name__} with reuse_grad_buffers=True, user should never "
@@ -733,10 +725,6 @@ class Optimizer(torch.optim.Optimizer):
                 self.grad_averager.reset_accumulated_grads_()
                 if not self.client_mode:
                     self.grad_averager.state_sharing_priority = self.local_epoch
-
-    def load_state_from_ps(self, **kwargs):
-        self.state_averager.load_state_from_ps(timeout=self.load_state_timeout, **kwargs)
-
 
     def state_dict(self) -> dict:
         state_dict = self.state_averager.optimizer.state_dict()

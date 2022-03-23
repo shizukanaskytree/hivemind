@@ -1,0 +1,1 @@
+WANDB_DISABLED=true python ps_server.py --wandb_project Demo-run

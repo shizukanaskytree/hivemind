@@ -1,3 +1,8 @@
+"""
+note about this file:
+https://www.notion.so/xiaofengwu/hivemind-allreduce-210bb553c3e74dee92fbab8566b524a2
+"""
+
 import asyncio
 from enum import Enum
 from typing import Any, AsyncIterator, Dict, Optional, Sequence, Set, Tuple, Type
@@ -33,15 +38,26 @@ class AllReduceRunner(ServicerBase):
     """
     An internal class that runs butterfly AllReduce in a predefined group of averagers.
 
+    wxf:
+    我很好奇:
+    1. a group of averagers
+
+    感觉很难理解, 需要调试一下.
+
+
     This class inherits hivemind.p2p.ServicerBase, so it can be used as an RPCServicer for testing purposes without
     creating a full DecentralizedAverager.
 
     :note: this class returns **differences** between averaged and local tensors in order to improve numerical stability
+
     :param p2p: a hivemind.p2p.P2P instance used for communication with other peers
+
     :param servicer_type: a hivemind.p2p.ServicerBase subclass whose RPC signatures are used
       when requesting other peers. Typically, it is DecentralizedAverager, its derivative,
       or AllReduceRunner itself (for testing purposes).
+
     :param prefix: namespace for servicer's RPCs (typically, equal to prefix for group keys)
+
     :param group_id: unique identifier of this specific all-reduce run
     :param tensors: local tensors that should be averaged with groupmates
     :param weight: scalar weight of this peer's tensors in the average (doesn't need to sum up to 1)
@@ -151,7 +167,12 @@ class AllReduceRunner(ServicerBase):
         return self.peer_fractions[self.ordered_peer_ids.index(peer_id)] == 0
 
     async def run(self) -> AsyncIterator[torch.Tensor]:
-        """Run all-reduce, return differences between averaged and original tensors as they are computed"""
+        """Run all-reduce, return differences between averaged and original tensors as they are computed
+
+        wxf: search yield in this function.
+
+        """
+
         pending_tasks = set()
 
         if self.tensor_part_container.num_parts_by_peer[self.ordered_peer_ids.index(self.peer_id)] != 0:
